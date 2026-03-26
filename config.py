@@ -86,3 +86,11 @@ EXPANSION_GAMMA         = 0.3   # γ: weight of expanded terms vs. originals (0<
 MAX_EXPANSIONS_PER_TERM = 3     # cap on synonyms added per key term
 MAX_DF_RATIO            = 0.10  # reject expansions present in >10% of docs (too generic)
 MIN_COOCCURRENCE        = 1     # candidate must co-occur with ≥1 original term in ≥N docs
+
+# ---------------------------------------------------------------------------
+# Memory management
+# ---------------------------------------------------------------------------
+# Maximum number of positions stored per term per field per document.
+# Positions beyond this cap are dropped — phrase/proximity matching is
+# unaffected in practice since a single nearby occurrence is all that's needed.
+MAX_POSITIONS_PER_FIELD = 200
