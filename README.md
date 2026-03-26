@@ -61,7 +61,15 @@ You only need to do this once — the index is saved to disk.
 
 ## Searching
 
-### Interactive mode
+### GUI (recommended)
+
+```bash
+streamlit run app.py
+```
+
+Opens in your browser automatically. Use the sidebar to build the index and control search parameters.
+
+### Command line (interactive mode)
 
 ```bash
 python search.py

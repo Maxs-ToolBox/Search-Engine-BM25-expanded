@@ -58,6 +58,9 @@ def build() -> None:
     # doc_stats[doc_id] = (title_len, body_len)
     doc_stats: list[tuple[int, int]] = []
 
+    # doc_snippets[doc_id] = short preview string (raw text, not stemmed)
+    doc_snippets: list[str] = []
+
     # build_index[term][doc_id] = {'t': [pos, ...], 'b': [pos, ...]}
     # Using defaultdict of defaultdict avoids explicit key checks.
     build_idx: dict[str, dict[int, dict]] = defaultdict(lambda: defaultdict(lambda: {"t": [], "b": []}))
@@ -79,6 +82,10 @@ def build() -> None:
         title_len = len(title_tokens)
         body_len  = len(body_tokens)
         doc_stats.append((title_len, body_len))
+
+        # Store a short raw snippet for display in the GUI
+        raw_body = doc["body"].strip().replace("\n", " ")
+        doc_snippets.append(raw_body[: config.SNIPPET_LENGTH])
 
         # Update index with title positions (capped to save memory)
         for term, pos in title_tokens:
@@ -150,11 +157,12 @@ def build() -> None:
     # ------------------------------------------------------------------
     # Persist everything
     # ------------------------------------------------------------------
-    print("\nSaving index files …")
+    print("\nSaving index files...")
     _save(inverted_index,   config.INDEX_FILE)
     _save(doc_map,          config.DOC_MAP_FILE)
     _save(doc_stats,        config.DOC_STATS_FILE)
     _save(collection_stats, config.COLL_STATS_FILE)
+    _save(doc_snippets,     config.SNIPPETS_FILE)
 
     print(f"\nDone. Total time: {time.time() - t0:.1f}s")
 

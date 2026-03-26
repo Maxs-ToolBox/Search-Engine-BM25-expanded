@@ -42,7 +42,11 @@ INDEX_DIR = os.path.join(BASE_DIR, "index_data")
 INDEX_FILE      = os.path.join(INDEX_DIR, "inverted_index.pkl")
 DOC_MAP_FILE    = os.path.join(INDEX_DIR, "doc_map.pkl")
 DOC_STATS_FILE  = os.path.join(INDEX_DIR, "doc_stats.pkl")
-COLL_STATS_FILE = os.path.join(INDEX_DIR, "collection_stats.pkl")
+COLL_STATS_FILE  = os.path.join(INDEX_DIR, "collection_stats.pkl")
+SNIPPETS_FILE    = os.path.join(INDEX_DIR, "doc_snippets.pkl")
+
+# Max characters stored as a preview snippet per document
+SNIPPET_LENGTH = 200
 
 # ---------------------------------------------------------------------------
 # Collection roots  (folder path, collection-type tag)
