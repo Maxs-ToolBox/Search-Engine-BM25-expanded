@@ -10,13 +10,32 @@ import os
 # ---------------------------------------------------------------------------
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-DATASET_DIR = os.path.join(
-    BASE_DIR,
-    "drive-download-20260326T121407Z-1-001",
-)
 
-DISK4 = os.path.join(DATASET_DIR, "TREC-Disk-4", "TREC-Disk-4")
-DISK5 = os.path.join(DATASET_DIR, "TREC-Disk-5", "TREC-Disk-5")
+def _find_disk(base: str, disk_name: str) -> str:
+    """
+    Search *base* recursively for a folder named *disk_name*
+    (e.g. 'TREC-Disk-4'). Works regardless of what the parent
+    download folder is called.
+    Returns the path to the inner data folder (the one that contains
+    FT/, FR94/, etc.) or raises FileNotFoundError with a helpful message.
+    """
+    for dirpath, dirnames, _ in os.walk(base):
+        for d in dirnames:
+            if d == disk_name:
+                candidate = os.path.join(dirpath, d)
+                # The TREC disks are double-nested: TREC-Disk-4/TREC-Disk-4/
+                inner = os.path.join(candidate, disk_name)
+                return inner if os.path.isdir(inner) else candidate
+    raise FileNotFoundError(
+        f"Could not find '{disk_name}' anywhere under '{base}'.\n"
+        f"Make sure the dataset is extracted inside the CODE folder."
+    )
+
+
+DISK4 = _find_disk(BASE_DIR, "TREC-Disk-4")
+DISK5 = _find_disk(BASE_DIR, "TREC-Disk-5")
+print(f"[config] TREC-Disk-4 = {DISK4}")
+print(f"[config] TREC-Disk-5 = {DISK5}")
 
 # Where to write / read the built index
 INDEX_DIR = os.path.join(BASE_DIR, "index_data")
