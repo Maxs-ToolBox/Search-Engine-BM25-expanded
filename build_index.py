@@ -37,7 +37,7 @@ def _save(obj, path: str) -> None:
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "wb") as fh:
         pickle.dump(obj, fh, protocol=pickle.HIGHEST_PROTOCOL)
-    print(f"  saved → {path}  ({os.path.getsize(path) / 1e6:.1f} MB)")
+    print(f"  saved: {path}  ({os.path.getsize(path) / 1e6:.1f} MB)")
 
 
 # ---------------------------------------------------------------------------
@@ -80,13 +80,17 @@ def build() -> None:
         body_len  = len(body_tokens)
         doc_stats.append((title_len, body_len))
 
-        # Update index with title positions
+        # Update index with title positions (capped to save memory)
         for term, pos in title_tokens:
-            build_idx[term][doc_id]["t"].append(pos)
+            entry = build_idx[term][doc_id]["t"]
+            if len(entry) < config.MAX_POSITIONS_PER_FIELD:
+                entry.append(pos)
 
-        # Update index with body positions
+        # Update index with body positions (capped to save memory)
         for term, pos in body_tokens:
-            build_idx[term][doc_id]["b"].append(pos)
+            entry = build_idx[term][doc_id]["b"]
+            if len(entry) < config.MAX_POSITIONS_PER_FIELD:
+                entry.append(pos)
 
         doc_count += 1
         if doc_count % 10_000 == 0:
@@ -113,7 +117,7 @@ def build() -> None:
     #       ]
     #   )
     # ------------------------------------------------------------------
-    print("\nConverting to final index format …", flush=True)
+    print("\nConverting to final index format...", flush=True)
     t1 = time.time()
 
     inverted_index: dict[str, tuple] = {}
