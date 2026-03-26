@@ -1,0 +1,20 @@
+# Built index (large binary files — rebuild with python build_index.py)
+index_data/
+
+# Dataset (not committed — too large)
+drive-download-*/
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.env
+venv/
+.venv/
+
+# Claude Code
+.claude/
+
+# OS
+.DS_Store
+Thumbs.db
