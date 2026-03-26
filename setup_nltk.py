@@ -7,10 +7,9 @@ Run this once after installing dependencies:
 import nltk
 
 RESOURCES = [
-    ("tokenizers", "punkt_tab"),
-    ("corpora",    "stopwords"),
-    ("corpora",    "wordnet"),
-    ("taggers",    "averaged_perceptron_tagger_eng"),
+    ("corpora", "stopwords"),
+    ("corpora", "wordnet"),
+    ("taggers", "averaged_perceptron_tagger_eng"),
 ]
 
 for category, name in RESOURCES:
