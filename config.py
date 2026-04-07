@@ -39,7 +39,7 @@ print(f"[config] TREC-Disk-5 = {DISK5}")
 
 # Where to write / read the built index
 INDEX_DIR = os.path.join(BASE_DIR, "index_data")
-INDEX_FILE      = os.path.join(INDEX_DIR, "inverted_index.pkl")
+INDEX_FILE      = os.path.join(INDEX_DIR, "inverted_index.db")
 DOC_MAP_FILE    = os.path.join(INDEX_DIR, "doc_map.pkl")
 DOC_STATS_FILE  = os.path.join(INDEX_DIR, "doc_stats.pkl")
 COLL_STATS_FILE  = os.path.join(INDEX_DIR, "collection_stats.pkl")
@@ -97,4 +97,16 @@ MIN_COOCCURRENCE        = 1     # candidate must co-occur with ≥1 original ter
 # Maximum number of positions stored per term per field per document.
 # Positions beyond this cap are dropped — phrase/proximity matching is
 # unaffected in practice since a single nearby occurrence is all that's needed.
-MAX_POSITIONS_PER_FIELD = 200
+# BM25 saturates around TF≈5 with k1=1.2, so 20 is plenty.
+MAX_POSITIONS_PER_FIELD = 20
+
+# ---------------------------------------------------------------------------
+# SPIMI indexing (memory management during build)
+# ---------------------------------------------------------------------------
+# Flush a partial index to disk every this many documents, then merge at the
+# end.  Lower = less peak RAM, more disk I/O.  20 000 ≈ 1–2 GB peak per chunk.
+SPIMI_CHUNK_SIZE = 20_000
+
+# Maximum characters read from a document body before preprocessing.
+# Guards against pathologically large documents causing MemoryError.
+MAX_BODY_CHARS = 200_000

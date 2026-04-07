@@ -14,6 +14,7 @@ import time
 import streamlit as st
 
 import config
+from index_store import SQLiteIndex
 
 # ---------------------------------------------------------------------------
 # Page config
@@ -37,12 +38,12 @@ def _index_exists() -> bool:
 
 @st.cache_resource(show_spinner="Loading index...")
 def load_index():
-    """Load all index files into memory (cached across reruns)."""
+    """Open the shelve index and load auxiliary pickle files (cached across reruns)."""
     def _load(path):
         with open(path, "rb") as fh:
             return pickle.load(fh)
 
-    inverted_index   = _load(config.INDEX_FILE)
+    inverted_index   = SQLiteIndex(config.INDEX_FILE)
     doc_map          = _load(config.DOC_MAP_FILE)
     doc_stats        = _load(config.DOC_STATS_FILE)
     collection_stats = _load(config.COLL_STATS_FILE)
