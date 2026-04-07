@@ -92,79 +92,32 @@ def _flush_run(build_idx: dict, runs_dir: str, run_num: int) -> str:
     return path
 
 
-_MERGE_BATCH = 10_000   # terms fetched/written per SQLite transaction
-
-
-def _merge_runs(run_paths: list[str], output_path: str) -> int:
+def _merge_runs(run_paths: list[str]) -> dict[str, tuple]:
     """
-    Merge all partial-index files into a SQLite database on disk.
+    Merge all partial-index files into a single in-memory inverted index.
 
-    Peak RAM ≈ one MERGE_BATCH slice of one run at a time.
-    Returns the number of unique terms written.
+    Because each run covers a disjoint, contiguous range of doc_ids, postings
+    from later runs always sort after earlier ones — simple concatenation gives
+    sorted order.
     """
-    import sqlite3 as _sql
-
-    conn = _sql.connect(output_path)
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA synchronous=OFF")
-    conn.execute("PRAGMA cache_size=-262144")   # 256 MB page cache
-    conn.execute(
-        "CREATE TABLE idx (term TEXT PRIMARY KEY, df INTEGER, postings BLOB)"
-    )
-
-    term_count = 0
+    inverted_index: dict[str, list] = {}
 
     for i, path in enumerate(run_paths):
         print(f"  merging run {i + 1}/{len(run_paths)} …", flush=True)
         with open(path, "rb") as fh:
             partial: dict[str, tuple] = pickle.load(fh)
 
-        items = list(partial.items())
-        del partial
+        for term, (df, postings) in partial.items():
+            if term in inverted_index:
+                entry = inverted_index[term]
+                entry[0] += df
+                entry[1].extend(postings)
+            else:
+                inverted_index[term] = [df, list(postings)]
 
-        for start in range(0, len(items), _MERGE_BATCH):
-            batch = items[start : start + _MERGE_BATCH]
-            terms = [t for t, _ in batch]
+        del partial  # release memory before next load
 
-            # Fetch any already-existing rows for this batch in one query
-            placeholders = ",".join("?" * len(terms))
-            existing = {
-                row[0]: (row[1], pickle.loads(row[2]))
-                for row in conn.execute(
-                    f"SELECT term, df, postings FROM idx WHERE term IN ({placeholders})",
-                    terms,
-                )
-            }
-
-            to_insert: list[tuple] = []
-            to_update: list[tuple] = []
-            for term, (df, postings) in batch:
-                if term in existing:
-                    old_df, old_posts = existing[term]
-                    to_update.append((
-                        old_df + df,
-                        pickle.dumps(old_posts + list(postings),
-                                     protocol=pickle.HIGHEST_PROTOCOL),
-                        term,
-                    ))
-                else:
-                    to_insert.append((
-                        term, df,
-                        pickle.dumps(list(postings),
-                                     protocol=pickle.HIGHEST_PROTOCOL),
-                    ))
-                    term_count += 1
-
-            with conn:   # auto-commit this transaction
-                if to_insert:
-                    conn.executemany("INSERT INTO idx VALUES (?,?,?)", to_insert)
-                if to_update:
-                    conn.executemany(
-                        "UPDATE idx SET df=?, postings=? WHERE term=?", to_update
-                    )
-
-    conn.close()
-    return term_count
+    return {term: (entry[0], entry[1]) for term, entry in inverted_index.items()}
 
 
 # ---------------------------------------------------------------------------
@@ -335,8 +288,8 @@ def build() -> None:
     # ------------------------------------------------------------------
     print("\nMerging partial runs …", flush=True)
     t1 = time.time()
-    term_count = _merge_runs(run_paths, config.INDEX_FILE)
-    print(f"  Unique terms    : {term_count:,}")
+    inverted_index = _merge_runs(run_paths)
+    print(f"  Unique terms    : {len(inverted_index):,}")
     print(f"  Merge time      : {time.time() - t1:.1f}s")
 
     # Remove temporary run files
@@ -361,6 +314,7 @@ def build() -> None:
     # Persist everything
     # ------------------------------------------------------------------
     print("\nSaving index files …")
+    _save(inverted_index,   config.INDEX_FILE)
     _save(doc_map,          config.DOC_MAP_FILE)
     _save(doc_stats,        config.DOC_STATS_FILE)
     _save(collection_stats, config.COLL_STATS_FILE)

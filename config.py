@@ -39,7 +39,7 @@ print(f"[config] TREC-Disk-5 = {DISK5}")
 
 # Where to write / read the built index
 INDEX_DIR = os.path.join(BASE_DIR, "index_data")
-INDEX_FILE      = os.path.join(INDEX_DIR, "inverted_index.db")
+INDEX_FILE      = os.path.join(INDEX_DIR, "inverted_index.pkl")
 DOC_MAP_FILE    = os.path.join(INDEX_DIR, "doc_map.pkl")
 DOC_STATS_FILE  = os.path.join(INDEX_DIR, "doc_stats.pkl")
 COLL_STATS_FILE  = os.path.join(INDEX_DIR, "collection_stats.pkl")

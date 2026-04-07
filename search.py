@@ -26,22 +26,21 @@ import config
 import preprocess
 import query_expand
 import rank as ranking
-from index_store import SQLiteIndex
 
 
 # ---------------------------------------------------------------------------
 # Index loading
 # ---------------------------------------------------------------------------
 
-def load_index() -> tuple[SQLiteIndex, list, list, dict]:
+def load_index() -> tuple[dict, list, list, dict]:
     """
     Load and return (inverted_index, doc_map, doc_stats, collection_stats).
-    inverted_index is a SQLiteIndex (disk-backed) — keeps RAM flat.
     Exits with a helpful message if the index has not been built yet.
     """
-    required = [config.DOC_MAP_FILE, config.DOC_STATS_FILE, config.COLL_STATS_FILE]
+    required = [config.INDEX_FILE, config.DOC_MAP_FILE,
+                config.DOC_STATS_FILE, config.COLL_STATS_FILE]
     missing  = [p for p in required if not os.path.exists(p)]
-    if missing or not os.path.exists(config.INDEX_FILE):
+    if missing:
         print("Index not found. Run:  python build_index.py")
         sys.exit(1)
 
@@ -51,11 +50,13 @@ def load_index() -> tuple[SQLiteIndex, list, list, dict]:
 
     print("Loading index … ", end="", flush=True)
     t0 = time.time()
-    inverted_index   = SQLiteIndex(config.INDEX_FILE)
+    inverted_index   = _load(config.INDEX_FILE)
     doc_map          = _load(config.DOC_MAP_FILE)
     doc_stats        = _load(config.DOC_STATS_FILE)
     collection_stats = _load(config.COLL_STATS_FILE)
-    print(f"done ({time.time() - t0:.1f}s)  |  {collection_stats['N']:,} docs")
+    print(f"done ({time.time() - t0:.1f}s)  |  "
+          f"{collection_stats['N']:,} docs  |  "
+          f"{len(inverted_index):,} terms")
     return inverted_index, doc_map, doc_stats, collection_stats
 
 
