@@ -131,5 +131,6 @@ Score = BM25F(original terms, weight=1.0)
 | `build_index.py` | Offline index builder |
 | `query_expand.py` | WordNet-based query expansion |
 | `rank.py` | BM25F + phrase + proximity scoring |
+| `index_store.py` | Dict-like wrapper for reading the on-disk index |
 | `search.py` | Command line search interface |
 | `setup_nltk.py` | Downloads required NLTK data |
