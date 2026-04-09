@@ -1,15 +1,39 @@
 """
 config.py — Central configuration for all paths and hyperparameters.
 Edit this file to tune the search engine behaviour.
+
+Sample mode (for markers / reproduction without the full TREC corpus):
+    Set the environment variable USE_SAMPLE=1 before launching, or run:
+        run_sample.bat       (Windows)
+        bash run_sample.sh   (Mac / Linux)
+
+Full mode (default — requires TREC Disk 4 & 5 in the project folder):
+    run_full.bat  /  streamlit run app.py
 """
 
 import os
+
+# ---------------------------------------------------------------------------
+# Mode switch  —  USE_SAMPLE=1  activates the pre-built sample package
+# ---------------------------------------------------------------------------
+USE_SAMPLE: bool = os.getenv("USE_SAMPLE", "0").strip() == "1"
 
 # ---------------------------------------------------------------------------
 # Paths
 # ---------------------------------------------------------------------------
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
+# --- Sample-mode paths (pre-built, no corpus needed) -----------------------
+SAMPLE_DIR        = os.path.join(BASE_DIR, "sample_index")
+SAMPLE_INDEX_FILE      = os.path.join(SAMPLE_DIR, "inverted_index.pkl")
+SAMPLE_DOC_MAP_FILE    = os.path.join(SAMPLE_DIR, "doc_map.pkl")
+SAMPLE_DOC_STATS_FILE  = os.path.join(SAMPLE_DIR, "doc_stats.pkl")
+SAMPLE_COLL_STATS_FILE = os.path.join(SAMPLE_DIR, "collection_stats.pkl")
+SAMPLE_SNIPPETS_FILE   = os.path.join(SAMPLE_DIR, "doc_snippets.pkl")
+SAMPLE_TOPICS_FILE     = os.path.join(BASE_DIR,   "sample_topics.txt")
+SAMPLE_QRELS_FILE      = os.path.join(BASE_DIR,   "sample_qrels.txt")
+
+# --- Full-mode helpers -----------------------------------------------------
 
 def _find_disk(base: str, disk_name: str) -> str:
     """
@@ -32,32 +56,44 @@ def _find_disk(base: str, disk_name: str) -> str:
     )
 
 
-DISK4 = _find_disk(BASE_DIR, "TREC-Disk-4")
-DISK5 = _find_disk(BASE_DIR, "TREC-Disk-5")
-print(f"[config] TREC-Disk-4 = {DISK4}")
-print(f"[config] TREC-Disk-5 = {DISK5}")
+if USE_SAMPLE:
+    # ── Sample mode ── no corpus required ──────────────────────────────────
+    print("[config] Running in SAMPLE MODE — using pre-built sample index.")
+    DISK4 = None
+    DISK5 = None
+    INDEX_DIR       = SAMPLE_DIR
+    INDEX_FILE      = SAMPLE_INDEX_FILE
+    DOC_MAP_FILE    = SAMPLE_DOC_MAP_FILE
+    DOC_STATS_FILE  = SAMPLE_DOC_STATS_FILE
+    COLL_STATS_FILE = SAMPLE_COLL_STATS_FILE
+    SNIPPETS_FILE   = SAMPLE_SNIPPETS_FILE
+    TOPICS_FILE     = SAMPLE_TOPICS_FILE
+    QRELS_FILE      = SAMPLE_QRELS_FILE
+    # Empty collection list — _find_document() gracefully returns None in sample mode
+    COLLECTIONS: list = []
+else:
+    # ── Full mode ── requires TREC Disk 4 & 5 ──────────────────────────────
+    DISK4 = _find_disk(BASE_DIR, "TREC-Disk-4")
+    DISK5 = _find_disk(BASE_DIR, "TREC-Disk-5")
+    print(f"[config] TREC-Disk-4 = {DISK4}")
+    print(f"[config] TREC-Disk-5 = {DISK5}")
 
-# Where to write / read the built index
-INDEX_DIR = os.path.join(BASE_DIR, "index_data")
-INDEX_FILE      = os.path.join(INDEX_DIR, "inverted_index.pkl")
-DOC_MAP_FILE    = os.path.join(INDEX_DIR, "doc_map.pkl")
-DOC_STATS_FILE  = os.path.join(INDEX_DIR, "doc_stats.pkl")
-COLL_STATS_FILE  = os.path.join(INDEX_DIR, "collection_stats.pkl")
-SNIPPETS_FILE    = os.path.join(INDEX_DIR, "doc_snippets.pkl")
+    INDEX_DIR       = os.path.join(BASE_DIR, "index_data")
+    INDEX_FILE      = os.path.join(INDEX_DIR, "inverted_index.pkl")
+    DOC_MAP_FILE    = os.path.join(INDEX_DIR, "doc_map.pkl")
+    DOC_STATS_FILE  = os.path.join(INDEX_DIR, "doc_stats.pkl")
+    COLL_STATS_FILE = os.path.join(INDEX_DIR, "collection_stats.pkl")
+    SNIPPETS_FILE   = os.path.join(INDEX_DIR, "doc_snippets.pkl")
+    TOPICS_FILE     = os.path.join(BASE_DIR,  "topics.txt")
+    QRELS_FILE      = os.path.join(BASE_DIR,  "qrels.txt")
 
-# Max characters stored as a preview snippet per document
-SNIPPET_LENGTH = 200
-
-# ---------------------------------------------------------------------------
-# Collection roots  (folder path, collection-type tag)
-# ---------------------------------------------------------------------------
-COLLECTIONS = [
-    (os.path.join(DISK4, "FT"),         "FT"),
-    (os.path.join(DISK4, "FR94"),       "FR94"),
-    (os.path.join(DISK4, "CR_103RD"),   "CR"),
-    (os.path.join(DISK5, "FBIS"),       "FBIS"),
-    (os.path.join(DISK5, "LATIMES"),    "LATIMES"),
-]
+    COLLECTIONS = [
+        (os.path.join(DISK4, "FT"),         "FT"),
+        (os.path.join(DISK4, "FR94"),       "FR94"),
+        (os.path.join(DISK4, "CR_103RD"),   "CR"),
+        (os.path.join(DISK5, "FBIS"),       "FBIS"),
+        (os.path.join(DISK5, "LATIMES"),    "LATIMES"),
+    ]
 
 # ---------------------------------------------------------------------------
 # Preprocessing flags

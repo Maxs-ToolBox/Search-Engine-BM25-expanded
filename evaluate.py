@@ -2,6 +2,7 @@ import csv
 from statistics import mean
 from typing import Dict, List, Tuple
 
+import config
 from metrics import (
     average_precision,
     ndcg_at_k,
@@ -11,14 +12,15 @@ from metrics import (
 )
 from qrels_parser import parse_qrels
 from topics_parser import parse_topics
-from search import load_index, load_snippets, process_query
+from search import load_index, process_query
 from variants import VARIANTS
 
 
-TOPICS_FILE = "topics.txt"
-QRELS_FILE = "qrels.txt"
+# Paths come from config so they automatically switch between full and sample mode.
+TOPICS_FILE = config.TOPICS_FILE
+QRELS_FILE  = config.QRELS_FILE
 
-SUMMARY_OUTPUT_CSV = "evaluation_results.csv"
+SUMMARY_OUTPUT_CSV   = "evaluation_results.csv"
 PER_QUERY_OUTPUT_CSV = "per_query_results.csv"
 
 BASELINE_VARIANT = "BM25_flattened"
@@ -49,7 +51,6 @@ def evaluate_variant(
     collection_stats,
     top_k: int = 100,
     debug: bool = False,
-    snippets=None
 ) -> Tuple[Dict[str, float], List[Dict[str, float]]]:
     variant_name = variant_config["name"]
 
@@ -83,7 +84,6 @@ def evaluate_variant(
             top_k=top_k,
             variant_config=variant_config,
             debug=debug,
-            snippets=snippets,
         )
 
         retrieved_docnos = [docno for _, docno in results]
@@ -346,7 +346,6 @@ def main() -> None:
 
     print("Loading search index...")
     inverted_index, doc_map, doc_stats, collection_stats = load_index()
-    snippets = load_snippets()
 
     summary_results = []
     all_per_query_rows = []
@@ -364,7 +363,6 @@ def main() -> None:
             collection_stats=collection_stats,
             top_k=100,
             debug=False,
-            snippets=snippets,
         )
 
         summary_results.append(summary_row)

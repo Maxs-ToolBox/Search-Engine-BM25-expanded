@@ -5,6 +5,7 @@ index_data/
 TREC-Disk-4/
 TREC-Disk-5/
 drive-download-*/
+sample_index.zip
 
 # Evaluation outputs
 evaluation_results.csv

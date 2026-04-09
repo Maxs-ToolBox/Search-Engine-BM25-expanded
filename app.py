@@ -291,8 +291,7 @@ def _load_index_cached():
 
 @st.cache_data(show_spinner=False)
 def _load_qrels() -> Dict[str, set]:
-    """Load qrels.txt → {topic_str: set(relevant_docnos)}"""
-    path = os.path.join(_BASE, "qrels.txt")
+    path = config.QRELS_FILE
     if not os.path.exists(path):
         return {}
     qrels: Dict[str, set] = {}
@@ -308,8 +307,7 @@ def _load_qrels() -> Dict[str, set]:
 
 @st.cache_data(show_spinner=False)
 def _load_topics() -> Dict[str, Dict[str, str]]:
-    """Parse topics.txt → {num_str: {title, desc}}"""
-    path = os.path.join(_BASE, "topics.txt")
+    path = config.TOPICS_FILE
     if not os.path.exists(path):
         return {}
     topics: Dict[str, Dict[str, str]] = {}
@@ -341,24 +339,17 @@ def _load_topics() -> Dict[str, Dict[str, str]]:
 
 @st.cache_data(show_spinner=False)
 def _load_eval_results() -> Optional[pd.DataFrame]:
-    """Load evaluation_results.csv into a DataFrame."""
     path = os.path.join(_BASE, "evaluation_results.csv")
     if not os.path.exists(path):
         return None
     try:
-        df = pd.read_csv(path)
-        return df
+        return pd.read_csv(path)
     except Exception:
         return None
 
 
 @st.cache_data(show_spinner=False, ttl=86400)
 def _find_document(docno: str) -> Optional[dict]:
-    """
-    Locate and return the full document for a DOCNO by scanning corpus files.
-    Uses fast string pre-filter: only fully parses the file that contains the DOCNO.
-    Result cached for 24 hours.
-    """
     prefix4 = docno[:4].upper()
     prefix2 = docno[:2].upper()
 
@@ -397,7 +388,7 @@ def _find_document(docno: str) -> Optional[dict]:
             try:
                 text = parse_docs._read_file(fpath)
                 if not text or docno not in text:
-                    continue                        # fast reject — DOCNO not in this file
+                    continue
                 for raw in parse_docs._split_docs(text):
                     doc = parser(raw)
                     if doc and doc.get("docno", "").strip() == docno:
@@ -474,6 +465,61 @@ def _score_quality(score: float, max_score: float) -> Tuple[str, str]:
     return "Weak", "label-weak"
 
 
+def _escape_html(text: str) -> str:
+    if text is None:
+        return ""
+    return (
+        str(text)
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace('"', "&quot;")
+    )
+
+
+def _safe_highlight_html(text: str, stems: set) -> str:
+    highlighted = _highlight_terms(text or "", stems)
+    highlighted = highlighted.replace("<mark>", "___MARK_OPEN___")
+    highlighted = highlighted.replace("</mark>", "___MARK_CLOSE___")
+    highlighted = _escape_html(highlighted)
+    highlighted = highlighted.replace("___MARK_OPEN___", "<mark>")
+    highlighted = highlighted.replace("___MARK_CLOSE___", "</mark>")
+    return highlighted
+
+
+def _render_static_table(df: pd.DataFrame) -> None:
+    if df is None or df.empty:
+        st.caption("No table data available.")
+        return
+
+    header_html = "".join(
+        f'<th style="text-align:left;padding:10px 12px;border-bottom:1px solid #313244;color:#89b4fa;">{_escape_html(col)}</th>'
+        for col in df.columns
+    )
+
+    rows_html = []
+    for _, row in df.iterrows():
+        cells = "".join(
+            f'<td style="padding:10px 12px;border-bottom:1px solid #1e1e2e;color:#cdd6f4;">{_escape_html(val)}</td>'
+            for val in row.tolist()
+        )
+        rows_html.append(f"<tr>{cells}</tr>")
+
+    table_html = f"""
+    <div style="overflow-x:auto;border:1px solid #313244;border-radius:10px;background:#181825;">
+      <table style="width:100%;border-collapse:collapse;font-size:0.84rem;">
+        <thead>
+          <tr>{header_html}</tr>
+        </thead>
+        <tbody>
+          {''.join(rows_html)}
+        </tbody>
+      </table>
+    </div>
+    """
+    st.markdown(table_html, unsafe_allow_html=True)
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Session state initialisation
 # ─────────────────────────────────────────────────────────────────────────────
@@ -493,48 +539,48 @@ with st.sidebar:
     st.markdown("### Search Engine")
     st.divider()
 
-    # Index status
     if _index_exists():
         st.success("Index ready")
     else:
         st.warning("Index not built")
 
-    with st.expander("Build Index", expanded=not _index_exists()):
-        st.caption("Run once on the TREC dataset (10–30 min).")
-        if st.button("Build Index", type="primary", use_container_width=True):
-            st.info("Building index — streaming live output…")
-            log_box = st.empty()
-            log_text = ""
-            proc = subprocess.Popen(
-                [sys.executable, "-u", "build_index.py"],
-                stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                text=True, bufsize=1,
-                cwd=_BASE,
-            )
-            for line in iter(proc.stdout.readline, ""):
-                log_text += line
-                log_box.code(log_text[-3000:], language=None)
-            proc.wait()
-            if proc.returncode == 0:
-                st.success("Done. Reload the page.")
-                st.cache_resource.clear()
-            else:
-                st.error("Build failed — see log above.")
+    if not config.USE_SAMPLE:
+        with st.expander("Build Index", expanded=not _index_exists()):
+            st.caption("Run once on the TREC dataset (10–30 min).")
+            if st.button("Build Index", type="primary", use_container_width=True):
+                st.info("Building index — streaming live output…")
+                log_box = st.empty()
+                log_text = ""
+                proc = subprocess.Popen(
+                    [sys.executable, "-u", "build_index.py"],
+                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                    text=True, bufsize=1,
+                    cwd=_BASE,
+                )
+                for line in iter(proc.stdout.readline, ""):
+                    log_text += line
+                    log_box.code(log_text[-3000:], language=None)
+                proc.wait()
+                if proc.returncode == 0:
+                    st.success("Done. Reload the page.")
+                    st.cache_resource.clear()
+                else:
+                    st.error("Build failed — see log above.")
+    else:
+        st.info("🗂️ Sample mode — pre-built index loaded. No corpus required.")
 
     st.divider()
 
-    # Variant selector
     st.markdown("**Retrieval Variant**")
     variant_display = [VARIANT_LABELS[v["name"]] for v in VARIANTS]
-    default_idx     = variant_display.index(VARIANT_LABELS[DEFAULT_VARIANT["name"]])
+    default_idx = variant_display.index(VARIANT_LABELS[DEFAULT_VARIANT["name"]])
 
     selected_display = st.selectbox(
         "Variant", options=variant_display, index=default_idx,
         label_visibility="collapsed",
         help="⭐ marks the best variant from ablation evaluation.",
     )
-    selected_name    = next(v["name"] for v in VARIANTS
-                            if VARIANT_LABELS[v["name"]] == selected_display)
+    selected_name = next(v["name"] for v in VARIANTS if VARIANT_LABELS[v["name"]] == selected_display)
     selected_variant = get_variant_by_name(selected_name)
 
     st.markdown(
@@ -549,7 +595,6 @@ with st.sidebar:
 
     st.divider()
 
-    # Parameters
     st.markdown("**Parameters**")
     top_k = st.slider("Results to show", min_value=5, max_value=100, value=10, step=5)
 
@@ -565,7 +610,6 @@ with st.sidebar:
 
     st.divider()
 
-    # Score guide
     st.markdown("**Score Guide**")
     st.markdown("""
 <div class="score-info-box">
@@ -600,30 +644,35 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
+if config.USE_SAMPLE:
+    st.markdown(
+        """
+        <div style="background:#1e2a3a;border:1px solid #3a6ea8;border-radius:8px;
+                    padding:10px 16px;margin-bottom:14px;font-size:0.83rem;color:#a6c8e8;">
+          🔬 <strong>Marker Sample Mode</strong> &nbsp;—&nbsp;
+          Running on a pre-built index of a licensed subset of TREC Robust04.
+          No corpus download or re-indexing required.
+          Sample topics and qrels are available in the <em>Evaluation Results</em> tab.
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
 if not _index_exists():
     st.warning("Index not built yet. Open **Build Index** in the sidebar.")
     st.stop()
 
-# Load all data
 inverted_index, doc_map, doc_stats, collection_stats, snippets, docno_to_id = _load_index_cached()
-qrels  = _load_qrels()
+qrels = _load_qrels()
 topics = _load_topics()
 eval_df = _load_eval_results()
 
 N = collection_stats["N"]
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Two main tabs
-# ─────────────────────────────────────────────────────────────────────────────
 tab_search, tab_eval = st.tabs(["Search", "Evaluation Results"])
 
 
-# ═════════════════════════════════════════════════════════════════════════════
-# TAB 1 — SEARCH
-# ═════════════════════════════════════════════════════════════════════════════
 with tab_search:
-
-    # ── Dataset info strip ──
     with st.expander(
         f"📚  {N:,} documents across 5 collections — click for details",
         expanded=False,
@@ -652,7 +701,6 @@ with tab_search:
 
     st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
 
-    # ── TREC Topic picker ──
     topic_options = ["— free text query —"] + [
         f"Topic {t['num']}: {t['title'].strip()}"
         for t in sorted(topics.values(), key=lambda x: int(x["num"]))
@@ -662,8 +710,8 @@ with tab_search:
         val = st.session_state["_topic_select"]
         if val.startswith("Topic"):
             num = val.split(":")[0].replace("Topic", "").strip()
-            t   = topics.get(num, {})
-            st.session_state["example_query"]   = t.get("title", "").strip()
+            t = topics.get(num, {})
+            st.session_state["example_query"] = t.get("title", "").strip()
             st.session_state["active_topic_num"] = num
         else:
             st.session_state["active_topic_num"] = None
@@ -678,19 +726,17 @@ with tab_search:
              "When a topic is selected, results show ground-truth relevance badges.",
     )
 
-    # Topic description (if a topic is selected)
     active_topic_num = st.session_state.get("active_topic_num")
     if active_topic_num and active_topic_num in topics:
         desc = topics[active_topic_num].get("desc", "").strip()
         if desc:
             st.markdown(
                 f'<div class="topic-desc-box">'
-                f'<strong>Topic {active_topic_num} description:</strong> {desc}'
+                f'<strong>Topic {active_topic_num} description:</strong> {_escape_html(desc)}'
                 f'</div>',
                 unsafe_allow_html=True,
             )
 
-    # ── Search box ──
     col_input, col_btn = st.columns([7, 1])
     with col_input:
         default_text = st.session_state.get("example_query", "")
@@ -704,7 +750,6 @@ with tab_search:
     with col_btn:
         search_clicked = st.button("Search", type="primary", use_container_width=True)
 
-    # ── Example query chips — 5 per row ──
     st.markdown(
         "<div style='font-size:0.72rem;color:#6c7086;margin:5px 0 3px 0;'>"
         "Example TREC Robust04 topics:</div>",
@@ -720,27 +765,24 @@ with tab_search:
                     help=f"TREC topic {q_num}",
                     use_container_width=True,
                 ):
-                    st.session_state["example_query"]   = q_text
+                    st.session_state["example_query"] = q_text
                     st.session_state["active_topic_num"] = None
                     st.rerun()
 
-    # ── Search history ──
     history = st.session_state.get("query_history", [])
     if history:
         st.markdown(
             "<div style='font-size:0.72rem;color:#6c7086;margin:6px 0 2px 0;'>"
             "Recent searches:</div>"
-            + "".join(f'<span class="history-item">{h}</span>' for h in history[-5:]),
+            + "".join(f'<span class="history-item">{_escape_html(h)}</span>' for h in history[-5:]),
             unsafe_allow_html=True,
         )
 
     st.markdown("<div style='height:4px'></div>", unsafe_allow_html=True)
 
-    # ── Execute search ──
     active_query = query or st.session_state.get("example_query", "")
 
     if not active_query:
-        # Welcome state
         st.markdown("""
 <div style="background:#1e1e2e;border:1px solid #313244;border-radius:12px;
             padding:28px 32px;margin-top:16px;text-align:center;">
@@ -755,7 +797,6 @@ with tab_search:
 </div>
 """, unsafe_allow_html=True)
     else:
-
         t0 = time.time()
         ranked = process_query(
             query_text=active_query,
@@ -769,30 +810,26 @@ with tab_search:
         )
         elapsed_ms = (time.time() - t0) * 1000
 
-        # Update history
         history = st.session_state.get("query_history", [])
         if active_query not in history:
             history.append(active_query)
             st.session_state["query_history"] = history[-10:]
 
-        # Stems for highlighting
         try:
             import preprocess as _pp
             _stems = set(st_t for _, st_t, _ in _pp.normalise(active_query))
         except Exception:
             _stems = set()
 
-        # Debug panel
         if show_debug:
             with st.expander("Query debug", expanded=True):
                 c1, c2, c3 = st.columns(3)
-                c1.metric("Results",   len(ranked))
+                c1.metric("Results", len(ranked))
                 c2.metric("Time (ms)", f"{elapsed_ms:.0f}")
-                c3.metric("Variant",   selected_name.split("_")[0])
+                c3.metric("Variant", selected_name.split("_")[0])
                 if _stems:
                     st.markdown("**Stems:** " + "  ".join(f"`{t}`" for t in sorted(_stems)))
 
-        # Expansion panel
         if show_expansion and selected_variant["use_query_expansion"]:
             try:
                 import preprocess as _pp
@@ -800,8 +837,8 @@ with tab_search:
                 _norm = _pp.normalise(active_query)
                 _surf = [s for s, _, _ in _norm]
                 _orig = list(dict.fromkeys(st_t for _, st_t, _ in _norm))
-                _tw   = _qe.expand_query(_orig, _surf, inverted_index, collection_stats)
-                _exp  = {t: w for t, w in _tw.items() if w < 1.0}
+                _tw = _qe.expand_query(_orig, _surf, inverted_index, collection_stats)
+                _exp = {t: w for t, w in _tw.items() if w < 1.0}
                 with st.expander(f"WordNet expansion — {len(_exp)} synonym(s) added", expanded=True):
                     c1, c2 = st.columns(2)
                     with c1:
@@ -821,16 +858,15 @@ with tab_search:
         else:
             max_score = ranked[0][0]
 
-            # Qrels for current topic (if selected)
             relevant_set: set = set()
             if active_topic_num:
                 relevant_set = qrels.get(str(active_topic_num), set())
 
             st.markdown(
                 f'<div class="results-summary">'
-                f'<b>{len(ranked)}</b> results for <b>"{active_query}"</b>'
+                f'<b>{len(ranked)}</b> results for <b>"{_escape_html(active_query)}"</b>'
                 f'&nbsp;·&nbsp;{elapsed_ms:.0f} ms'
-                f'&nbsp;·&nbsp;variant: <b>{selected_name.replace("_", " ")}</b>'
+                f'&nbsp;·&nbsp;variant: <b>{_escape_html(selected_name.replace("_", " "))}</b>'
                 + (f'&nbsp;·&nbsp;<span style="color:#a6e3a1;">topic {active_topic_num} — '
                    f'{len(relevant_set)} relevant docs in qrels</span>'
                    if active_topic_num and relevant_set else "")
@@ -838,20 +874,18 @@ with tab_search:
                 unsafe_allow_html=True,
             )
 
-            # ── Result cards ──
             for rank_pos, (score, docno) in enumerate(ranked, start=1):
-
-                raw_snip    = _get_snippet(docno, snippets, docno_to_id)
+                raw_snip = _get_snippet(docno, snippets, docno_to_id)
                 pseudo_title = _extract_title(raw_snip)
                 body_preview = _truncate(_remaining_snippet(raw_snip, pseudo_title))
-                hl_title     = _highlight_terms(pseudo_title, _stems)
-                hl_body      = _highlight_terms(body_preview,  _stems)
+
+                hl_title = _safe_highlight_html(pseudo_title, _stems)
+                hl_body = _safe_highlight_html(body_preview, _stems)
 
                 src_label, badge_color = _get_source(docno)
-                score_pct              = min(100, int((score / max_score) * 100))
+                score_pct = min(100, int((score / max_score) * 100)) if max_score > 0 else 0
                 quality_text, qual_cls = _score_quality(score, max_score)
 
-                # Relevance badge (only if a TREC topic is active)
                 rel_html = ""
                 if active_topic_num:
                     if docno in relevant_set:
@@ -859,92 +893,102 @@ with tab_search:
                     else:
                         rel_html = '<span class="rel-badge-no">✗ Not judged relevant</span>'
 
-                snippet_html = (f'<span class="card-title">{hl_title}</span><br>'
-                                if pseudo_title else "")
-                if hl_body:
-                    snippet_html += f'<div class="snippet">{hl_body}</div>'
-                elif not pseudo_title:
-                    snippet_html += '<div class="snippet"><em>No preview available.</em></div>'
+                title_html = (
+                    f'<span class="card-title">{hl_title}</span><br>'
+                    if pseudo_title else ""
+                )
+
+                body_html = (
+                    f'<div class="snippet">{hl_body}</div>'
+                    if hl_body else
+                    ('<div class="snippet"><em>No preview available.</em></div>' if not pseudo_title else "")
+                )
 
                 card_html = f"""
 <div class="result-card">
   <div class="card-header">
     <span class="rank-badge">#{rank_pos}</span>
     <div class="card-title-block">
-      {snippet_html}
-      <span class="card-docno">{docno}</span>
+      {title_html}
+      {body_html}
+      <span class="card-docno">{_escape_html(docno)}</span>
     </div>
-    <span class="source-badge" style="background:{badge_color};">{src_label}</span>
+    <span class="source-badge" style="background:{badge_color};">{_escape_html(src_label)}</span>
     {rel_html}
     <div class="score-block">
       <span class="score-value">{score:.4f}</span>
-      <span class="score-label {qual_cls}">{quality_text}</span>
+      <span class="score-label {qual_cls}">{_escape_html(quality_text)}</span>
     </div>
   </div>
   <div class="score-bar-track">
     <div class="score-bar-fill" style="width:{score_pct}%;"></div>
   </div>
-</div>"""
+</div>
+"""
                 st.markdown(card_html, unsafe_allow_html=True)
 
-                # ── Article viewer ──
-                art_key  = f"article_{docno}"
+                art_key = f"article_{docno}"
                 load_key = f"load_{rank_pos}_{docno}"
-                dl_key   = f"dl_{rank_pos}_{docno}"
+                dl_key = f"dl_{rank_pos}_{docno}"
 
-                btn_col, dl_col, spacer = st.columns([1.6, 1.6, 8])
-                with btn_col:
-                    if st.button("📄 Load Full Article", key=load_key, use_container_width=True):
-                        with st.spinner(f"Searching corpus for {docno}…"):
-                            doc = _find_document(docno)
-                        st.session_state[art_key] = doc
+                if config.USE_SAMPLE:
+                    st.caption("Full-article loading is disabled in sample mode.")
+                else:
+                    btn_col, dl_col, spacer = st.columns([1.6, 1.6, 8])
 
-                if art_key in st.session_state:
-                    doc = st.session_state[art_key]
-                    if doc:
-                        body_text = doc.get("body", "") or ""
-                        title_text = doc.get("title", "") or ""
-                        dl_content = (
-                            f"DOCNO: {docno}\n"
-                            + (f"Title: {title_text}\n" if title_text else "")
-                            + f"\n{body_text}"
-                        )
-                        with dl_col:
-                            st.download_button(
-                                "⬇ Download .txt",
-                                data=dl_content.encode("utf-8"),
-                                file_name=f"{docno}.txt",
-                                mime="text/plain",
-                                key=dl_key,
-                                use_container_width=True,
+                    with btn_col:
+                        if st.button("📄 Load Full Article", key=load_key, use_container_width=True):
+                            with st.spinner(f"Searching corpus for {docno}…"):
+                                doc = _find_document(docno)
+                            st.session_state[art_key] = doc
+
+                    if art_key in st.session_state:
+                        doc = st.session_state[art_key]
+                        if doc:
+                            body_text = doc.get("body", "") or ""
+                            title_text = doc.get("title", "") or ""
+                            dl_content = (
+                                f"DOCNO: {docno}\n"
+                                + (f"Title: {title_text}\n" if title_text else "")
+                                + f"\n{body_text}"
+                            )
+                            with dl_col:
+                                st.download_button(
+                                    "⬇ Download .txt",
+                                    data=dl_content.encode("utf-8"),
+                                    file_name=f"{docno}.txt",
+                                    mime="text/plain",
+                                    key=dl_key,
+                                    use_container_width=True,
+                                )
+
+                            title_html = (
+                                f'<div class="article-title">{_escape_html(title_text)}</div>'
+                                if title_text else
+                                f'<div class="article-title" style="color:#585b70;">'
+                                f'[No title — {_escape_html(src_label)}]</div>'
                             )
 
-                        # Article display panel
-                        title_html = (
-                            f'<div class="article-title">{title_text}</div>'
-                            if title_text else
-                            f'<div class="article-title" style="color:#585b70;">'
-                            f'[No title — {src_label}]</div>'
-                        )
-                        st.markdown(
-                            f'<div class="article-panel">'
-                            f'{title_html}'
-                            f'<div style="font-size:0.70rem;color:#585b70;margin-bottom:10px;">'
-                            f'DOCNO: {docno} &nbsp;·&nbsp; {src_label}'
-                            f'</div>'
-                            f'<div class="article-body">{body_text[:8000]}'
-                            + ("\n\n[truncated — download for full text]"
-                               if len(body_text) > 8000 else "")
-                            + f'</div></div>',
-                            unsafe_allow_html=True,
-                        )
-                    else:
-                        st.warning(
-                            f"Article {docno} not found in corpus. "
-                            "Ensure the TREC data files are present at the paths in config.py."
-                        )
+                            article_body = _escape_html(body_text[:8000])
+                            if len(body_text) > 8000:
+                                article_body += "\n\n[truncated — download for full text]"
 
-            # ── Footer ──
+                            st.markdown(
+                                f'<div class="article-panel">'
+                                f'{title_html}'
+                                f'<div style="font-size:0.70rem;color:#585b70;margin-bottom:10px;">'
+                                f'DOCNO: {_escape_html(docno)} &nbsp;·&nbsp; {_escape_html(src_label)}'
+                                f'</div>'
+                                f'<div class="article-body">{article_body}</div>'
+                                f'</div>',
+                                unsafe_allow_html=True,
+                            )
+                        else:
+                            st.warning(
+                                f"Article {docno} not found in corpus. "
+                                "Ensure the TREC data files are present at the paths in config.py."
+                            )
+
             st.markdown("---")
             st.caption(
                 f"Top {len(ranked)} of up to {top_k} candidates · "
@@ -958,11 +1002,7 @@ with tab_search:
             )
 
 
-# ═════════════════════════════════════════════════════════════════════════════
-# TAB 2 — EVALUATION RESULTS
-# ═════════════════════════════════════════════════════════════════════════════
 with tab_eval:
-
     st.markdown("### Ablation Evaluation — TREC Robust04")
     st.caption(
         "249 topics (301–549) evaluated using official qrels. "
@@ -975,30 +1015,24 @@ with tab_eval:
             "Run evaluate.py against the TREC qrels to generate this file."
         )
     else:
-        # ── Clean display names for table ──
         display_df = eval_df.copy()
-        display_df["System"] = display_df["variant"].map(
-            lambda n: _variant_label(n)
-        )
+        display_df["System"] = display_df["variant"].map(lambda n: _variant_label(n))
         metric_cols = ["MAP", "P@10", "nDCG@10", "Recall@100", "R-Precision"]
-        available   = [c for c in metric_cols if c in display_df.columns]
+        available = [c for c in metric_cols if c in display_df.columns]
 
-        # Round for display
         for c in available:
             display_df[c] = display_df[c].round(4)
 
-        # Find best MAP row
         best_idx = display_df["MAP"].idxmax()
 
-        # ── Metric highlights ──
         st.markdown("#### Key Metrics")
-        metric_display = available[:4]   # MAP, P@10, nDCG@10, Recall@100
+        metric_display = available[:4]
         col_metrics = st.columns(len(metric_display))
         for col, metric in zip(col_metrics, metric_display):
-            best_val   = display_df[metric].max()
-            best_sys   = display_df.loc[display_df[metric].idxmax(), "System"]
-            worst_val  = display_df[metric].min()
-            delta_pct  = f"+{(best_val - worst_val) / worst_val * 100:.1f}% vs baseline"
+            best_val = display_df[metric].max()
+            best_sys = display_df.loc[display_df[metric].idxmax(), "System"]
+            worst_val = display_df[metric].min()
+            delta_pct = f"+{(best_val - worst_val) / worst_val * 100:.1f}% vs baseline"
             with col:
                 st.metric(
                     label=metric,
@@ -1010,7 +1044,6 @@ with tab_eval:
         st.markdown("#### Results Table")
         st.caption("⭐ = best-performing system per MAP")
 
-        # Build styled table as markdown
         headers = ["System"] + available + ["Queries"]
         rows = []
         for _, row in display_df.iterrows():
@@ -1021,24 +1054,17 @@ with tab_eval:
             rows.append([sys_name] + vals + [q])
 
         table_df = pd.DataFrame(rows, columns=headers)
-        st.dataframe(
-            table_df,
-            use_container_width=True,
-            hide_index=True,
-        )
+        _render_static_table(table_df)
 
-        # ── Bar chart — MAP comparison ──
         st.markdown("#### MAP by System")
         chart_df = display_df[["System", "MAP"]].set_index("System")
         st.bar_chart(chart_df, use_container_width=True)
 
-        # ── nDCG@10 ──
         if "nDCG@10" in display_df.columns:
             st.markdown("#### nDCG@10 by System")
             ndcg_df = display_df[["System", "nDCG@10"]].set_index("System")
             st.bar_chart(ndcg_df, use_container_width=True)
 
-        # ── Interpretation ──
         st.markdown("#### Interpretation")
         st.markdown("""
 **Pattern of improvement across variants:**
@@ -1069,7 +1095,6 @@ this system is demonstrating that careful engineering of BM25F + term-dependence
 controlled expansion yields meaningful, interpretable gains over a flat BM25 baseline.
 """)
 
-        # ── Per-query results if available ──
         pq_path = os.path.join(_BASE, "per_query_results.csv")
         if os.path.exists(pq_path):
             st.markdown("#### Per-Query Results (top 10 topics by AP, best variant)")
@@ -1082,12 +1107,9 @@ controlled expansion yields meaningful, interpretable gains over a flat BM25 bas
                         .sort_values("AP", ascending=False)
                         .head(10)
                     )
-                    show_cols = [c for c in ["topic_id", "query", "AP", "P@10", "nDCG@10"]
-                                 if c in pq_best.columns]
-                    st.dataframe(
-                        pq_best[show_cols].reset_index(drop=True),
-                        use_container_width=True,
-                        hide_index=True,
+                    show_cols = [c for c in ["topic_id", "query", "AP", "P@10", "nDCG@10"] if c in pq_best.columns]
+                    _render_static_table(
+                        pq_best[show_cols].reset_index(drop=True)
                     )
             except Exception as e:
                 st.caption(f"Could not load per-query results: {e}")

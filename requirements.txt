@@ -1,3 +1,4 @@
 nltk>=3.8
 tqdm>=4.64
 streamlit>=1.32
+pandas>=2.0
