@@ -1,8 +1,6 @@
 """
-app.py — Field-Aware BM25F Search Engine (ECS736PU CW1/CW2)
-
-Field-Aware BM25F Search Engine with Phrase/Proximity Modelling
-and Controlled Thesaurus-Based Query Expansion
+app.py  —  Field-Aware BM25F Search Engine
+           Phrase/Proximity Modelling · Controlled Thesaurus-Based Query Expansion
 
 Run with:
     streamlit run app.py
@@ -10,6 +8,7 @@ Run with:
 
 import os
 import sys
+import csv
 import pickle
 import subprocess
 import time
@@ -17,127 +16,95 @@ import re
 from typing import Dict, List, Optional, Tuple
 
 import streamlit as st
+import pandas as pd
 
 import config
+import parse_docs
 from search import load_index, process_query
 from variants import VARIANTS, DEFAULT_VARIANT, get_variant_by_name
 
 
-# ---------------------------------------------------------------------------
+# ─────────────────────────────────────────────────────────────────────────────
 # Page config
-# ---------------------------------------------------------------------------
+# ─────────────────────────────────────────────────────────────────────────────
 st.set_page_config(
-    page_title="BM25F Search Engine — ECS736PU",
+    page_title="Field-Aware BM25F Search Engine",
     page_icon="🔍",
     layout="wide",
     initial_sidebar_state="expanded",
 )
 
-# ---------------------------------------------------------------------------
-# Custom CSS
-# ---------------------------------------------------------------------------
+# ─────────────────────────────────────────────────────────────────────────────
+# CSS
+# ─────────────────────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
-/* ---------- global typography ---------- */
-html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
+html, body, [class*="css"] { font-family: 'Inter', 'Segoe UI', sans-serif; }
 
-/* ---------- hero header ---------- */
+/* ── hero ── */
 .hero-title {
-    font-size: 1.85rem;
-    font-weight: 800;
-    color: #cdd6f4;
-    letter-spacing: -0.02em;
-    line-height: 1.2;
-    margin-bottom: 4px;
+    font-size: 1.75rem; font-weight: 800; color: #cdd6f4;
+    letter-spacing: -0.02em; line-height: 1.2; margin-bottom: 3px;
 }
 .hero-sub {
-    font-size: 0.82rem;
-    color: #6c7086;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
-    margin-bottom: 2px;
+    font-size: 0.80rem; color: #6c7086;
+    letter-spacing: 0.05em; text-transform: uppercase; margin-bottom: 2px;
 }
-.hero-team {
-    font-size: 0.78rem;
-    color: #585b70;
-}
+.hero-team { font-size: 0.76rem; color: #585b70; margin-top: 5px; }
 
-/* ---------- query chip row ---------- */
-.chip-row { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0 16px 0; }
-.q-chip {
-    display: inline-block;
-    background: #1e1e2e;
-    border: 1px solid #313244;
-    border-radius: 999px;
-    padding: 4px 12px;
-    font-size: 0.78rem;
-    color: #89b4fa;
-    cursor: pointer;
-    transition: all 0.15s;
-    white-space: nowrap;
-}
-.q-chip:hover { background: #313244; border-color: #89b4fa; }
-
-/* ---------- result card ---------- */
+/* ── result card ── */
 .result-card {
-    background: #1e1e2e;
-    border: 1px solid #313244;
-    border-radius: 12px;
-    padding: 16px 20px 14px 20px;
-    margin-bottom: 12px;
-    transition: border-color 0.15s;
+    background: #1e1e2e; border: 1px solid #313244;
+    border-radius: 12px; padding: 15px 18px 12px 18px;
+    margin-bottom: 4px; transition: border-color 0.15s;
 }
 .result-card:hover { border-color: #89b4fa; }
 
-/* card header row */
-.card-header {
-    display: flex;
-    align-items: flex-start;
-    gap: 10px;
-    flex-wrap: wrap;
-    margin-bottom: 6px;
-}
+.card-header { display: flex; align-items: flex-start; gap: 10px; flex-wrap: wrap; }
 .rank-badge {
-    font-size: 0.78rem; font-weight: 700;
-    color: #a6adc8; background: #181825;
-    border: 1px solid #313244; border-radius: 6px;
-    padding: 2px 8px; white-space: nowrap; flex-shrink: 0;
-    margin-top: 2px;
+    font-size: 0.75rem; font-weight: 700; color: #a6adc8;
+    background: #181825; border: 1px solid #313244; border-radius: 6px;
+    padding: 2px 7px; white-space: nowrap; flex-shrink: 0; margin-top: 2px;
 }
 .card-title-block { flex: 1; min-width: 0; }
 .card-title {
-    font-size: 0.97rem; font-weight: 600;
-    color: #cdd6f4; line-height: 1.35;
-    margin-bottom: 2px;
+    font-size: 0.95rem; font-weight: 600; color: #cdd6f4;
+    line-height: 1.35; margin-bottom: 2px;
 }
 .card-docno {
     font-family: 'Courier New', monospace;
-    font-size: 0.75rem; color: #585b70;
+    font-size: 0.73rem; color: #585b70;
 }
 .source-badge {
-    font-size: 0.70rem; font-weight: 700;
-    border-radius: 999px; padding: 2px 9px;
-    white-space: nowrap; flex-shrink: 0;
-    margin-top: 3px; opacity: 0.95;
+    font-size: 0.68rem; font-weight: 700; border-radius: 999px;
+    padding: 2px 9px; white-space: nowrap; flex-shrink: 0;
+    margin-top: 3px; opacity: 0.95; color: #e0e0f0;
+}
+.rel-badge-yes {
+    font-size: 0.68rem; font-weight: 700; border-radius: 999px;
+    padding: 2px 9px; background: #1e3a2e; color: #a6e3a1;
+    border: 1px solid #2e5a3e; white-space: nowrap; flex-shrink: 0;
+    margin-top: 3px;
+}
+.rel-badge-no {
+    font-size: 0.68rem; font-weight: 700; border-radius: 999px;
+    padding: 2px 9px; background: #2a1a1a; color: #f38ba8;
+    border: 1px solid #5a2e2e; white-space: nowrap; flex-shrink: 0;
+    margin-top: 3px;
 }
 .score-block { text-align: right; flex-shrink: 0; }
-.score-value {
-    font-size: 0.88rem; font-weight: 700;
-    color: #cdd6f4; display: block;
-}
+.score-value { font-size: 0.88rem; font-weight: 700; color: #cdd6f4; display: block; }
 .score-label {
-    font-size: 0.68rem; font-weight: 600;
-    border-radius: 999px; padding: 1px 7px;
-    display: inline-block; margin-top: 2px;
+    font-size: 0.66rem; font-weight: 600; border-radius: 999px;
+    padding: 1px 7px; display: inline-block; margin-top: 2px;
 }
 .label-strong { background: #1e3a2e; color: #a6e3a1; }
 .label-good   { background: #3a3020; color: #f9e2af; }
 .label-weak   { background: #2e1e1e; color: #f38ba8; }
 
-/* score bar */
 .score-bar-track {
-    height: 3px; background: #313244;
-    border-radius: 99px; margin: 8px 0 10px 0; overflow: hidden;
+    height: 3px; background: #313244; border-radius: 99px;
+    margin: 8px 0 6px 0; overflow: hidden;
 }
 .score-bar-fill {
     height: 100%;
@@ -145,56 +112,64 @@ html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
     border-radius: 99px;
 }
 
-/* snippet */
-.snippet {
-    font-size: 0.875rem; color: #a6adc8;
-    line-height: 1.6; margin-top: 4px;
-}
+.snippet { font-size: 0.875rem; color: #a6adc8; line-height: 1.6; margin-top: 3px; }
 .snippet em { color: #45475a; font-style: italic; }
-.snippet mark {
-    background: #2a2d3e; color: #f9e2af;
-    border-radius: 3px; padding: 0 2px;
-}
+.snippet mark { background: #2a2d3e; color: #f9e2af; border-radius: 3px; padding: 0 2px; }
 
-/* ---------- results summary bar ---------- */
+/* ── article viewer ── */
+.article-panel {
+    background: #181825; border: 1px solid #45475a; border-radius: 10px;
+    padding: 18px 22px; margin: 6px 0 14px 0;
+}
+.article-title { font-size: 1.05rem; font-weight: 700; color: #cdd6f4; margin-bottom: 10px; }
+.article-body  { font-size: 0.875rem; color: #bac2de; line-height: 1.7; white-space: pre-wrap; }
+
+/* ── results summary ── */
 .results-summary {
-    font-size: 0.82rem; color: #6c7086;
-    margin-bottom: 14px; padding-bottom: 10px;
-    border-bottom: 1px solid #1e1e2e;
+    font-size: 0.80rem; color: #6c7086;
+    margin-bottom: 14px; padding-bottom: 8px; border-bottom: 1px solid #1e1e2e;
 }
 
-/* ---------- dataset badge strip ---------- */
-.ds-badge {
-    display: inline-block;
-    background: #181825; border: 1px solid #313244;
-    border-radius: 6px; padding: 4px 10px;
-    font-size: 0.73rem; color: #89b4fa;
-    margin: 3px 4px 3px 0;
+/* ── topic description box ── */
+.topic-desc-box {
+    background: #181825; border-left: 3px solid #89b4fa;
+    border-radius: 0 8px 8px 0; padding: 10px 14px;
+    font-size: 0.82rem; color: #a6adc8; line-height: 1.6; margin-bottom: 10px;
 }
 
-/* ---------- score info box ---------- */
+/* ── score info box (sidebar) ── */
 .score-info-box {
-    background: #181825; border: 1px solid #313244;
-    border-radius: 8px; padding: 10px 14px;
-    font-size: 0.80rem; color: #a6adc8; line-height: 1.6;
+    background: #181825; border: 1px solid #313244; border-radius: 8px;
+    padding: 10px 14px; font-size: 0.78rem; color: #a6adc8; line-height: 1.7;
 }
 .score-info-box strong { color: #cdd6f4; }
 
-/* ---------- feature chips (sidebar) ---------- */
+/* ── feature chips ── */
 .feature-chip {
-    display: inline-block; font-size: 0.72rem; font-weight: 600;
-    border-radius: 6px; padding: 2px 8px;
-    margin: 2px 3px 2px 0;
+    display: inline-block; font-size: 0.70rem; font-weight: 600;
+    border-radius: 6px; padding: 2px 7px; margin: 2px 2px 2px 0;
 }
 .chip-on  { background: #1e3a2e; color: #a6e3a1; border: 1px solid #2e5a3e; }
 .chip-off { background: #2a1e2e; color: #f38ba8; border: 1px solid #5a2e3e; }
+
+/* ── eval table ── */
+.eval-table th { font-size: 0.80rem; color: #89b4fa; font-weight: 600; }
+.eval-table td { font-size: 0.82rem; color: #cdd6f4; }
+.best-row td   { background: #1e3a2e !important; }
+
+/* ── search history ── */
+.history-item {
+    display: inline-block; background: #1e1e2e; border: 1px solid #313244;
+    border-radius: 999px; padding: 3px 10px; font-size: 0.75rem; color: #a6adc8;
+    margin: 2px 3px; cursor: pointer;
+}
 </style>
 """, unsafe_allow_html=True)
 
 
-# ---------------------------------------------------------------------------
-# Constants — variant metadata
-# ---------------------------------------------------------------------------
+# ─────────────────────────────────────────────────────────────────────────────
+# Variant metadata (safe fallback for any unknown variant)
+# ─────────────────────────────────────────────────────────────────────────────
 _VARIANT_LABELS_KNOWN: Dict[str, str] = {
     "BM25_flattened":                        "BM25 Flattened  (baseline)",
     "BM25_separate_unweighted":              "BM25 Separate Fields  (unweighted)",
@@ -205,41 +180,32 @@ _VARIANT_LABELS_KNOWN: Dict[str, str] = {
 }
 
 def _variant_label(name: str) -> str:
-    """Return a human-readable label for any variant name, with a safe fallback."""
     return _VARIANT_LABELS_KNOWN.get(name, name.replace("_", " "))
 
-# Public alias used throughout the file
 VARIANT_LABELS: Dict[str, str] = {v["name"]: _variant_label(v["name"]) for v in VARIANTS}
 
-VARIANT_DESCRIPTIONS: Dict[str, str] = {
+_VARIANT_DESC: Dict[str, str] = {
     "BM25_flattened":
-        "Title and body merged into one field before scoring. "
-        "Simplest baseline — loses all field-weight information.",
+        "Title and body merged into one field. Simplest baseline — loses all field-weight information.",
     "BM25_separate_unweighted":
-        "Title and body scored separately then summed with equal weight. "
+        "Title and body scored separately, summed with equal weight. "
         "Captures field structure but does not boost title matches.",
     "BM25F":
         "BM25F (Zaragoza 2004): title weighted ×5 over body. "
-        "Field-aware normalisation gives better ranking precision.",
+        "Field-aware normalisation — better ranking precision than unweighted.",
     "BM25F_phrase_proximity":
-        "BM25F plus a phrase bonus when query terms appear consecutively, "
-        "and a proximity bonus when terms appear within an 8-word window.",
+        "BM25F + phrase bonus when query terms appear consecutively, "
+        "and proximity bonus when terms appear within an 8-word window.",
     "BM25F_phrase_proximity_expand":
-        "Full system: BM25F + phrase/proximity bonuses + WordNet query "
-        "expansion (γ=0.3). Expanded synonyms weighted at 0.3 vs originals. "
-        "Best MAP and nDCG@10 of all lexical variants.",
+        "Full system: BM25F + phrase/proximity + WordNet expansion (γ=0.3). "
+        "Best MAP and nDCG@10 across all lexical variants.",
     "BM25F_phrase_proximity_expand_rerank50":
-        "Full lexical system + neural cross-encoder reranking applied to the "
-        "top 50 candidates. Stage C of the pipeline (optional). "
+        "Full lexical system + neural cross-encoder reranking on top 50 candidates. "
         "Note: reranking reduced MAP in evaluation — lexical variant preferred.",
 }
 
-def _variant_description(name: str) -> str:
-    """Return a description for any variant, with a safe fallback."""
-    return VARIANT_DESCRIPTIONS.get(
-        name,
-        name.replace("_", " ") + " — custom variant.",
-    )
+def _variant_desc(name: str) -> str:
+    return _VARIANT_DESC.get(name, name.replace("_", " ") + " — custom variant.")
 
 FEATURE_FLAGS = [
     ("use_fields",          "Field-aware"),
@@ -249,166 +215,54 @@ FEATURE_FLAGS = [
     ("use_query_expansion", "WordNet expansion"),
 ]
 
-# ---------------------------------------------------------------------------
-# Constants — dataset descriptions
-# ---------------------------------------------------------------------------
+# ─────────────────────────────────────────────────────────────────────────────
+# Dataset descriptions
+# ─────────────────────────────────────────────────────────────────────────────
 DATASETS = [
-    {
-        "code": "FT",
-        "name": "Financial Times",
-        "years": "1992–1994",
-        "docs": "~210,000",
-        "color": "#1a3a5e",
-        "badge_color": "#3a6aae",
-        "desc": "Business and financial news from the Financial Times newspaper. "
-                "Covers markets, companies, international economics, and politics.",
-    },
-    {
-        "code": "FR94",
-        "name": "Federal Register",
-        "years": "1994",
-        "docs": "~55,000",
-        "color": "#1e3a1a",
-        "badge_color": "#3a7a3a",
-        "desc": "Official US government regulatory notices, proposed rules, and "
-                "executive orders published in 1994. Dense legal and technical language.",
-    },
-    {
-        "code": "CR",
-        "name": "Congressional Record",
-        "years": "1993",
-        "docs": "~51,000",
-        "color": "#3a1a2e",
-        "badge_color": "#8a3a6e",
-        "desc": "Verbatim record of proceedings and debates from the 103rd US Congress. "
-                "Includes floor speeches, amendments, and committee reports.",
-    },
-    {
-        "code": "FBIS",
-        "name": "Foreign Broadcast Information Service",
-        "years": "1996",
-        "docs": "~130,000",
-        "color": "#1a2e3e",
-        "badge_color": "#3a6e8e",
-        "desc": "Translated foreign news monitored and broadcast by the US government "
-                "intelligence service. Covers news from Asia, Europe, Middle East, and Africa.",
-    },
-    {
-        "code": "LA",
-        "name": "LA Times",
-        "years": "1989–1990",
-        "docs": "~131,000",
-        "color": "#3a2a0a",
-        "badge_color": "#8a6a2a",
-        "desc": "General news, politics, sports, and culture from the Los Angeles Times. "
-                "Wide topic breadth makes it one of the most query-diverse collections.",
-    },
+    {"code": "FT",   "name": "Financial Times",
+     "years": "1992–1994", "docs": "~210,000", "badge_color": "#2a5a9e",
+     "desc": "Business and financial news. Covers markets, companies, economics and politics."},
+    {"code": "FR94", "name": "Federal Register",
+     "years": "1994",      "docs": "~55,000",  "badge_color": "#3a7a3a",
+     "desc": "US government regulatory notices, proposed rules and executive orders. Dense legal language."},
+    {"code": "CR",   "name": "Congressional Record",
+     "years": "1993",      "docs": "~51,000",  "badge_color": "#7a3a6a",
+     "desc": "Verbatim record of 103rd US Congress proceedings, floor speeches and amendments."},
+    {"code": "FBIS", "name": "FBIS",
+     "years": "1996",      "docs": "~130,000", "badge_color": "#3a6e8e",
+     "desc": "Translated foreign news from Asia, Europe, Middle East and Africa."},
+    {"code": "LA",   "name": "LA Times",
+     "years": "1989–1990", "docs": "~131,000", "badge_color": "#8a6a2a",
+     "desc": "General news, politics, sport and culture. Most query-diverse collection."},
 ]
 
 _SOURCE_MAP: Dict[str, Tuple[str, str]] = {
     ds["code"]: (ds["name"], ds["badge_color"]) for ds in DATASETS
 }
 
-# ---------------------------------------------------------------------------
-# Constants — example queries from TREC Robust04 topics
-# ---------------------------------------------------------------------------
+# ─────────────────────────────────────────────────────────────────────────────
+# Example queries — 10 real TREC Robust04 topics (5 × 2 rows)
+# ─────────────────────────────────────────────────────────────────────────────
 EXAMPLE_QUERIES = [
-    ("Hubble Telescope Achievements",    "303"),
-    ("Endangered Species Mammals",       "304"),
-    ("International Organized Crime",    "301"),
+    ("Hubble Telescope Achievements",     "303"),
+    ("Endangered Species Mammals",        "304"),
+    ("International Organized Crime",     "301"),
     ("Industrial Espionage Trade Secrets","311"),
-    ("Radio Waves Brain Cancer",         "310"),
-    ("New Hydroelectric Projects",       "307"),
-    ("African Civilian Deaths War",      "306"),
-    ("Implant Dentistry Advantages",     "308"),
-    ("Poliomyelitis Post-Polio",         "302"),
-    ("Vehicle Crashworthiness Safety",   "305"),
+    ("Radio Waves Brain Cancer",          "310"),
+    ("New Hydroelectric Projects",        "307"),
+    ("African Civilian Deaths War",       "306"),
+    ("Implant Dentistry Advantages",      "308"),
+    ("Poliomyelitis Post-Polio",          "302"),
+    ("Vehicle Crashworthiness Safety",    "305"),
 ]
 
-
-# ---------------------------------------------------------------------------
-# Helpers — source badge
-# ---------------------------------------------------------------------------
-def _get_source(docno: str) -> Tuple[str, str]:
-    prefix = docno[:2].upper()
-    return _SOURCE_MAP.get(prefix, ("Unknown", "#313244"))
+_BASE = os.path.dirname(os.path.abspath(__file__))
 
 
-# ---------------------------------------------------------------------------
-# Helpers — pseudo-title from snippet
-# ---------------------------------------------------------------------------
-def _extract_title(snippet: str, max_chars: int = 90) -> str:
-    """
-    Extract the first sentence of a snippet to use as a display title.
-    Falls back to a word-boundary cut at max_chars.
-    """
-    if not snippet:
-        return ""
-    for delim in [". ", "! ", "? ", "; "]:
-        idx = snippet.find(delim)
-        if 5 < idx <= max_chars:
-            return snippet[:idx + 1].strip()
-    if len(snippet) <= max_chars:
-        return snippet.strip()
-    cut = snippet[:max_chars].rsplit(" ", 1)[0]
-    return cut.strip() + "…"
+# ─────────────────────────────────────────────────────────────────────────────
+# Data loading helpers — all cached
+# ─────────────────────────────────────────────────────────────────────────────
 
-
-def _remaining_snippet(snippet: str, title: str) -> str:
-    """
-    Return the snippet text after the title portion (for the body preview).
-    """
-    if title and snippet.startswith(title.rstrip("…").rstrip(".")):
-        rest = snippet[len(title.rstrip("…").rstrip(".")) :].lstrip(". ").strip()
-        return rest
-    return snippet
-
-
-# ---------------------------------------------------------------------------
-# Helpers — term highlighting
-# ---------------------------------------------------------------------------
-def _highlight_terms(text: str, stemmed_terms: set) -> str:
-    if not text or not stemmed_terms:
-        return text or ""
-    try:
-        import preprocess as _pp
-
-        def _replace(match):
-            word = match.group(0)
-            norm = _pp.normalise(word)
-            if norm:
-                _, stemmed, _ = norm[0]
-                if stemmed in stemmed_terms:
-                    return f"<mark>{word}</mark>"
-            return word
-
-        return re.sub(r"\b[A-Za-z']+\b", _replace, text)
-    except Exception:
-        return text
-
-
-def _truncate(text: str, max_chars: int = 240) -> str:
-    if not text or len(text) <= max_chars:
-        return text or ""
-    return text[:max_chars].rsplit(" ", 1)[0] + " …"
-
-
-# ---------------------------------------------------------------------------
-# Helpers — score quality label
-# ---------------------------------------------------------------------------
-def _score_quality(score: float, max_score: float) -> Tuple[str, str]:
-    ratio = score / max_score if max_score > 0 else 0
-    if ratio >= 0.70:
-        return "Strong", "label-strong"
-    elif ratio >= 0.40:
-        return "Good", "label-good"
-    else:
-        return "Weak", "label-weak"
-
-
-# ---------------------------------------------------------------------------
-# Index loading — cached
-# ---------------------------------------------------------------------------
 def _index_exists() -> bool:
     return all(os.path.exists(p) for p in [
         config.INDEX_FILE, config.DOC_MAP_FILE,
@@ -416,7 +270,7 @@ def _index_exists() -> bool:
     ])
 
 
-@st.cache_resource(show_spinner="⏳ Loading index…")
+@st.cache_resource(show_spinner="Loading index…")
 def _load_index_cached():
     def _pkl(path):
         with open(path, "rb") as fh:
@@ -431,10 +285,135 @@ def _load_index_cached():
     if hasattr(config, "SNIPPETS_FILE") and os.path.exists(config.SNIPPETS_FILE):
         snippets = _pkl(config.SNIPPETS_FILE)
 
-    # O(1) docno → doc_id lookup for snippet retrieval
     docno_to_id: Dict[str, int] = {docno: i for i, docno in enumerate(doc_map)}
-
     return inverted_index, doc_map, doc_stats, collection_stats, snippets, docno_to_id
+
+
+@st.cache_data(show_spinner=False)
+def _load_qrels() -> Dict[str, set]:
+    """Load qrels.txt → {topic_str: set(relevant_docnos)}"""
+    path = os.path.join(_BASE, "qrels.txt")
+    if not os.path.exists(path):
+        return {}
+    qrels: Dict[str, set] = {}
+    with open(path, encoding="utf-8", errors="replace") as fh:
+        for line in fh:
+            parts = line.strip().split()
+            if len(parts) >= 4:
+                topic, _, docno, relevance = parts[:4]
+                if int(relevance) > 0:
+                    qrels.setdefault(topic, set()).add(docno)
+    return qrels
+
+
+@st.cache_data(show_spinner=False)
+def _load_topics() -> Dict[str, Dict[str, str]]:
+    """Parse topics.txt → {num_str: {title, desc}}"""
+    path = os.path.join(_BASE, "topics.txt")
+    if not os.path.exists(path):
+        return {}
+    topics: Dict[str, Dict[str, str]] = {}
+    current: Dict[str, str] = {}
+    section = None
+    with open(path, encoding="utf-8", errors="replace") as fh:
+        for line in fh:
+            line = line.rstrip()
+            if "<num>" in line.lower():
+                m = re.search(r"Number:\s*(\d+)", line, re.IGNORECASE)
+                if m:
+                    current = {"num": m.group(1), "title": "", "desc": ""}
+                    section = None
+            elif "<title>" in line.lower():
+                current["title"] = re.sub(r"<title>\s*", "", line, flags=re.IGNORECASE).strip()
+                section = "title"
+            elif "<desc>" in line.lower():
+                section = "desc"
+            elif "<narr>" in line.lower() or "</top>" in line.lower():
+                section = None
+                if current.get("num"):
+                    topics[current["num"]] = current.copy()
+            elif section == "title" and line.strip() and not line.startswith("<"):
+                current["title"] += " " + line.strip()
+            elif section == "desc" and line.strip() and not line.startswith("<"):
+                current["desc"] += " " + line.strip()
+    return topics
+
+
+@st.cache_data(show_spinner=False)
+def _load_eval_results() -> Optional[pd.DataFrame]:
+    """Load evaluation_results.csv into a DataFrame."""
+    path = os.path.join(_BASE, "evaluation_results.csv")
+    if not os.path.exists(path):
+        return None
+    try:
+        df = pd.read_csv(path)
+        return df
+    except Exception:
+        return None
+
+
+@st.cache_data(show_spinner=False, ttl=86400)
+def _find_document(docno: str) -> Optional[dict]:
+    """
+    Locate and return the full document for a DOCNO by scanning corpus files.
+    Uses fast string pre-filter: only fully parses the file that contains the DOCNO.
+    Result cached for 24 hours.
+    """
+    prefix4 = docno[:4].upper()
+    prefix2 = docno[:2].upper()
+
+    if prefix4 == "FBIS":
+        ctype = "FBIS"
+    elif prefix2 == "LA":
+        ctype = "LATIMES"
+    elif prefix2 == "FT":
+        ctype = "FT"
+    elif prefix2 == "FR":
+        ctype = "FR94"
+    elif prefix2 == "CR":
+        ctype = "CR"
+    else:
+        return None
+
+    root_dir = None
+    for rdir, ct in config.COLLECTIONS:
+        if ct == ctype:
+            root_dir = rdir
+            break
+
+    if not root_dir or not os.path.isdir(root_dir):
+        return None
+
+    parser = parse_docs._PARSERS.get(ctype)
+    if parser is None:
+        return None
+
+    for dirpath, dirnames, filenames in os.walk(root_dir):
+        dirnames[:] = [d for d in dirnames if d.upper() != "DTDS"]
+        for fname in sorted(filenames):
+            if parse_docs._should_skip(fname):
+                continue
+            fpath = os.path.join(dirpath, fname)
+            try:
+                text = parse_docs._read_file(fpath)
+                if not text or docno not in text:
+                    continue                        # fast reject — DOCNO not in this file
+                for raw in parse_docs._split_docs(text):
+                    doc = parser(raw)
+                    if doc and doc.get("docno", "").strip() == docno:
+                        return doc
+            except Exception:
+                continue
+    return None
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Helper functions
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _get_source(docno: str) -> Tuple[str, str]:
+    prefix = docno[:4].upper() if docno[:4].upper() == "FBIS" else docno[:2].upper()
+    return _SOURCE_MAP.get(prefix, _SOURCE_MAP.get(docno[:2].upper(), ("Unknown", "#313244")))
 
 
 def _get_snippet(docno: str, snippets, docno_to_id) -> str:
@@ -446,335 +425,448 @@ def _get_snippet(docno: str, snippets, docno_to_id) -> str:
     return snippets[doc_id] or ""
 
 
-# ---------------------------------------------------------------------------
-# Session state — clicked example query
-# ---------------------------------------------------------------------------
-if "example_query" not in st.session_state:
-    st.session_state["example_query"] = ""
+def _extract_title(snippet: str, max_chars: int = 90) -> str:
+    if not snippet:
+        return ""
+    for delim in [". ", "! ", "? ", "; "]:
+        idx = snippet.find(delim)
+        if 5 < idx <= max_chars:
+            return snippet[:idx + 1].strip()
+    if len(snippet) <= max_chars:
+        return snippet.strip()
+    return snippet[:max_chars].rsplit(" ", 1)[0].strip() + "…"
 
 
-# ---------------------------------------------------------------------------
+def _remaining_snippet(snippet: str, title: str) -> str:
+    if title:
+        base = title.rstrip("…").rstrip(".")
+        if snippet.startswith(base):
+            return snippet[len(base):].lstrip(". ").strip()
+    return snippet
+
+
+def _highlight_terms(text: str, stems: set) -> str:
+    if not text or not stems:
+        return text or ""
+    try:
+        import preprocess as _pp
+        def _sub(m):
+            word = m.group(0)
+            n = _pp.normalise(word)
+            return f"<mark>{word}</mark>" if n and n[0][1] in stems else word
+        return re.sub(r"\b[A-Za-z']+\b", _sub, text)
+    except Exception:
+        return text
+
+
+def _truncate(text: str, n: int = 240) -> str:
+    if not text or len(text) <= n:
+        return text or ""
+    return text[:n].rsplit(" ", 1)[0] + " …"
+
+
+def _score_quality(score: float, max_score: float) -> Tuple[str, str]:
+    r = score / max_score if max_score > 0 else 0
+    if r >= 0.70:
+        return "Strong", "label-strong"
+    if r >= 0.40:
+        return "Good", "label-good"
+    return "Weak", "label-weak"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Session state initialisation
+# ─────────────────────────────────────────────────────────────────────────────
+for _k, _v in {
+    "example_query": "",
+    "query_history": [],
+    "active_topic_num": None,
+}.items():
+    if _k not in st.session_state:
+        st.session_state[_k] = _v
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Sidebar
-# ---------------------------------------------------------------------------
+# ─────────────────────────────────────────────────────────────────────────────
 with st.sidebar:
-    st.markdown("### 🔍 Search Engine")
-    st.caption("ECS736PU · Information Retrieval")
+    st.markdown("### Search Engine")
     st.divider()
 
     # Index status
     if _index_exists():
-        st.success("✅ Index ready")
+        st.success("Index ready")
     else:
-        st.warning("⚠️ Index not built yet")
+        st.warning("Index not built")
 
-    with st.expander("🔨 Build Index", expanded=not _index_exists()):
+    with st.expander("Build Index", expanded=not _index_exists()):
         st.caption("Run once on the TREC dataset (10–30 min).")
         if st.button("Build Index", type="primary", use_container_width=True):
             st.info("Building index — streaming live output…")
             log_box = st.empty()
             log_text = ""
-            process = subprocess.Popen(
+            proc = subprocess.Popen(
                 [sys.executable, "-u", "build_index.py"],
                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                 text=True, bufsize=1,
-                cwd=os.path.dirname(os.path.abspath(__file__)),
+                cwd=_BASE,
             )
-            for line in iter(process.stdout.readline, ""):
+            for line in iter(proc.stdout.readline, ""):
                 log_text += line
                 log_box.code(log_text[-3000:], language=None)
-            process.wait()
-            if process.returncode == 0:
-                st.success("Done. Reload the page to search.")
+            proc.wait()
+            if proc.returncode == 0:
+                st.success("Done. Reload the page.")
                 st.cache_resource.clear()
             else:
                 st.error("Build failed — see log above.")
 
     st.divider()
 
-    # ── Variant selector ──
-    st.markdown("### Retrieval Variant")
-
+    # Variant selector
+    st.markdown("**Retrieval Variant**")
     variant_display = [VARIANT_LABELS[v["name"]] for v in VARIANTS]
-    default_display = VARIANT_LABELS[DEFAULT_VARIANT["name"]]
-    default_idx     = variant_display.index(default_display)
+    default_idx     = variant_display.index(VARIANT_LABELS[DEFAULT_VARIANT["name"]])
 
     selected_display = st.selectbox(
-        "Variant",
-        options=variant_display,
-        index=default_idx,
+        "Variant", options=variant_display, index=default_idx,
         label_visibility="collapsed",
-        help="⭐ marks the best-performing variant from ablation evaluation.",
+        help="⭐ marks the best variant from ablation evaluation.",
     )
-    selected_name    = [v["name"] for v in VARIANTS
-                        if VARIANT_LABELS[v["name"]] == selected_display][0]
+    selected_name    = next(v["name"] for v in VARIANTS
+                            if VARIANT_LABELS[v["name"]] == selected_display)
     selected_variant = get_variant_by_name(selected_name)
 
-    # Feature chips
     st.markdown(
         " ".join(
-            f'<span class="feature-chip {"chip-on" if selected_variant[flag] else "chip-off"}">'
-            f'{"✓" if selected_variant[flag] else "✗"} {label}</span>'
-            for flag, label in FEATURE_FLAGS
+            f'<span class="feature-chip {"chip-on" if selected_variant[f] else "chip-off"}">'
+            f'{"✓" if selected_variant[f] else "✗"} {lbl}</span>'
+            for f, lbl in FEATURE_FLAGS
         ),
         unsafe_allow_html=True,
     )
-    st.caption(_variant_description(selected_name))
+    st.caption(_variant_desc(selected_name))
 
     st.divider()
 
-    # ── Parameters ──
-    st.markdown("### Parameters")
+    # Parameters
+    st.markdown("**Parameters**")
     top_k = st.slider("Results to show", min_value=5, max_value=100, value=10, step=5)
 
     show_expansion = st.toggle(
-        "Show expansion details",
-        value=False,
+        "Show expansion details", value=False,
         disabled=not selected_variant["use_query_expansion"],
         help="Show which WordNet synonyms were added and their weights.",
     )
     show_debug = st.toggle(
-        "Show query debug info",
-        value=False,
-        help="Show normalised query terms and timing breakdown.",
+        "Show query debug", value=False,
+        help="Show normalised stems and timing.",
     )
 
     st.divider()
 
-    # ── Score guide ──
-    st.markdown("### Score Guide")
+    # Score guide
+    st.markdown("**Score Guide**")
     st.markdown("""
 <div class="score-info-box">
-BM25F scores are <strong>not normalised</strong> — they reflect evidence
-accumulation and are comparable only within one result set.<br><br>
-<span class="score-label label-strong">Strong</span> Top ~30% of results
-for this query<br>
-<span class="score-label label-good">Good</span> Mid-range results<br>
-<span class="score-label label-weak">Weak</span> Low overlap with query<br><br>
-Relative <em>rank</em> matters more than absolute score value.
+BM25F scores are <strong>not normalised</strong> — comparable only within one result set.<br><br>
+<span class="score-label label-strong">Strong</span> Top 30% of results<br>
+<span class="score-label label-good">Good</span>   Mid-range<br>
+<span class="score-label label-weak">Weak</span>   Low query overlap<br><br>
+Relative <em>rank</em> matters more than absolute score.
 </div>
 """, unsafe_allow_html=True)
 
     st.divider()
     st.caption(
-        "**Stemmer:** Porter · stopwords removed\n\n"
-        "**Fields:** title ×5 + body ×1\n\n"
-        f"**k₁={config.K1}  b_t={config.B_TITLE}  b_b={config.B_BODY}**"
+        f"Stemmer: Porter · stopwords removed  \n"
+        f"Fields: title ×{int(config.W_TITLE)} + body ×{int(config.W_BODY)}  \n"
+        f"k₁ = {config.K1}  ·  b_title = {config.B_TITLE}  ·  b_body = {config.B_BODY}"
     )
 
 
-# ---------------------------------------------------------------------------
-# Main area — hero header
-# ---------------------------------------------------------------------------
+# ─────────────────────────────────────────────────────────────────────────────
+# Main — hero header
+# ─────────────────────────────────────────────────────────────────────────────
 st.markdown("""
-<div style="margin-bottom: 6px;">
-  <div class="hero-sub">ECS736PU · Information Retrieval · Queen Mary University of London</div>
-  <div class="hero-title">
-    Field-Aware BM25F Search Engine
+<div style="margin-bottom:8px;">
+  <div class="hero-title">Field-Aware BM25F Search Engine</div>
+  <div style="font-size:0.80rem; color:#6c7086; margin-top:2px;">
+    Phrase/Proximity Modelling · Controlled Thesaurus-Based Query Expansion · TREC Robust04
   </div>
-  <div style="font-size:0.82rem; color:#6c7086; margin-top:2px;">
-    Phrase/Proximity Modelling · Controlled Thesaurus-Based Query Expansion
-  </div>
-  <div class="hero-team" style="margin-top:6px;">
+  <div class="hero-team">
     Blazej Olszta · Muhamad Husaam Ateeq · Max Monaghan · Sulaiman Bhatti
   </div>
 </div>
 """, unsafe_allow_html=True)
 
 if not _index_exists():
-    st.warning(
-        "The index has not been built yet. "
-        "Open **Build Index** in the sidebar to get started."
-    )
+    st.warning("Index not built yet. Open **Build Index** in the sidebar.")
     st.stop()
 
-# Load index (cached after first run)
-inverted_index, doc_map, doc_stats, collection_stats, snippets, docno_to_id = (
-    _load_index_cached()
-)
+# Load all data
+inverted_index, doc_map, doc_stats, collection_stats, snippets, docno_to_id = _load_index_cached()
+qrels  = _load_qrels()
+topics = _load_topics()
+eval_df = _load_eval_results()
 
 N = collection_stats["N"]
 
-# ── Dataset info strip ──
-with st.expander(
-    f"📚 {N:,} documents indexed across 5 collections — click for dataset details",
-    expanded=False,
-):
-    for ds in DATASETS:
-        st.markdown(
-            f"**{ds['name']}** ({ds['code']}) &nbsp;·&nbsp; "
-            f"{ds['years']} &nbsp;·&nbsp; {ds['docs']} docs  \n"
-            f"{ds['desc']}",
-        )
-        st.markdown("---")
-    st.caption(
-        "Collection: **TREC Disk 4 & 5 (Robust04)**. "
-        "Used in TREC Robust Track 2004 to evaluate retrieval robustness "
-        "across 249 topics (301–700). Queries range from single-word to "
-        "complex multi-concept topics."
-    )
+# ─────────────────────────────────────────────────────────────────────────────
+# Two main tabs
+# ─────────────────────────────────────────────────────────────────────────────
+tab_search, tab_eval = st.tabs(["Search", "Evaluation Results"])
 
-st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
 
-# ---------------------------------------------------------------------------
-# Search box
-# ---------------------------------------------------------------------------
-col_input, col_btn = st.columns([7, 1])
-with col_input:
-    # Allow example query clicks to pre-fill the box
-    default_text = st.session_state.get("example_query", "")
-    query = st.text_input(
-        label="Search query",
-        value=default_text,
-        placeholder="e.g.  Hubble Telescope Achievements  ·  industrial espionage trade secrets",
-        label_visibility="collapsed",
-        key="query_input",
-    )
-with col_btn:
-    search_clicked = st.button("Search", type="primary", use_container_width=True)
+# ═════════════════════════════════════════════════════════════════════════════
+# TAB 1 — SEARCH
+# ═════════════════════════════════════════════════════════════════════════════
+with tab_search:
 
-# ── Example query chips ──
-st.markdown(
-    "<div style='font-size:0.75rem; color:#6c7086; margin:6px 0 4px 0;'>"
-    "Try a TREC Robust04 topic:</div>",
-    unsafe_allow_html=True,
-)
-
-# Render example chips as buttons in a compact row
-chip_cols = st.columns(len(EXAMPLE_QUERIES))
-for idx, (q_text, q_num) in enumerate(EXAMPLE_QUERIES):
-    with chip_cols[idx]:
-        if st.button(
-            q_text,
-            key=f"chip_{q_num}",
-            help=f"TREC topic {q_num}: {q_text}",
-            use_container_width=True,
-        ):
-            st.session_state["example_query"] = q_text
-            st.rerun()
-
-st.markdown("<div style='height:4px'></div>", unsafe_allow_html=True)
-
-# ---------------------------------------------------------------------------
-# Execute search
-# ---------------------------------------------------------------------------
-active_query = query or st.session_state.get("example_query", "")
-
-if active_query and (search_clicked or active_query):
-
-    t0 = time.time()
-    ranked = process_query(
-        query_text=active_query,
-        inverted_index=inverted_index,
-        doc_map=doc_map,
-        doc_stats=doc_stats,
-        collection_stats=collection_stats,
-        top_k=top_k,
-        variant_config=selected_variant,
-        debug=False,
-    )
-    elapsed_ms = (time.time() - t0) * 1000
-
-    # ── Stemmed terms for highlighting ──
-    try:
-        import preprocess as _pp
-        norm = _pp.normalise(active_query)
-        _stems = set(st_t for _, st_t, _ in norm)
-    except Exception:
-        _stems = set()
-
-    # ── Debug info ──
-    if show_debug:
-        try:
-            import preprocess as _pp
-            norm = _pp.normalise(active_query)
-            stemmed_display = [st_t for _, st_t, _ in norm]
-        except Exception:
-            stemmed_display = []
-        with st.expander("🔬 Query debug", expanded=True):
-            c1, c2, c3 = st.columns(3)
-            c1.metric("Results", len(ranked))
-            c2.metric("Time (ms)", f"{elapsed_ms:.0f}")
-            c3.metric("Variant", selected_name.split("_")[0])
-            if stemmed_display:
+    # ── Dataset info strip ──
+    with st.expander(
+        f"📚  {N:,} documents across 5 collections — click for details",
+        expanded=False,
+    ):
+        cols_ds = st.columns(len(DATASETS))
+        for col, ds in zip(cols_ds, DATASETS):
+            with col:
                 st.markdown(
-                    "**Normalised stems:** "
-                    + "  ".join(f"`{t}`" for t in stemmed_display)
+                    f'<div style="border:1px solid #313244;border-radius:8px;'
+                    f'padding:10px;background:#181825;">'
+                    f'<div style="font-size:0.72rem;font-weight:700;color:#89b4fa;">'
+                    f'{ds["code"]}</div>'
+                    f'<div style="font-size:0.82rem;font-weight:600;color:#cdd6f4;'
+                    f'margin:3px 0;">{ds["name"]}</div>'
+                    f'<div style="font-size:0.70rem;color:#6c7086;">'
+                    f'{ds["years"]} · {ds["docs"]} docs</div>'
+                    f'<div style="font-size:0.72rem;color:#a6adc8;margin-top:5px;">'
+                    f'{ds["desc"]}</div>'
+                    f'</div>',
+                    unsafe_allow_html=True,
                 )
+        st.caption(
+            "TREC Disk 4 & 5 (Robust04) — used in TREC Robust Track 2004 to evaluate "
+            "retrieval robustness across 249 topics (301–700)."
+        )
 
-    # ── Expansion details ──
-    if show_expansion and selected_variant["use_query_expansion"]:
-        try:
-            import preprocess as _pp
-            import query_expand as _qe
-            norm = _pp.normalise(active_query)
-            surface_tokens = [s for s, _, _ in norm]
-            original_terms = list(dict.fromkeys(st_t for _, st_t, _ in norm))
-            term_weights = _qe.expand_query(
-                original_terms, surface_tokens, inverted_index, collection_stats
+    st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+
+    # ── TREC Topic picker ──
+    topic_options = ["— free text query —"] + [
+        f"Topic {t['num']}: {t['title'].strip()}"
+        for t in sorted(topics.values(), key=lambda x: int(x["num"]))
+    ] if topics else ["— free text query —"]
+
+    def _on_topic_change():
+        val = st.session_state["_topic_select"]
+        if val.startswith("Topic"):
+            num = val.split(":")[0].replace("Topic", "").strip()
+            t   = topics.get(num, {})
+            st.session_state["example_query"]   = t.get("title", "").strip()
+            st.session_state["active_topic_num"] = num
+        else:
+            st.session_state["active_topic_num"] = None
+
+    st.selectbox(
+        "TREC Topic",
+        options=topic_options,
+        index=0,
+        key="_topic_select",
+        on_change=_on_topic_change,
+        help="Select an official TREC Robust04 topic to auto-fill the query. "
+             "When a topic is selected, results show ground-truth relevance badges.",
+    )
+
+    # Topic description (if a topic is selected)
+    active_topic_num = st.session_state.get("active_topic_num")
+    if active_topic_num and active_topic_num in topics:
+        desc = topics[active_topic_num].get("desc", "").strip()
+        if desc:
+            st.markdown(
+                f'<div class="topic-desc-box">'
+                f'<strong>Topic {active_topic_num} description:</strong> {desc}'
+                f'</div>',
+                unsafe_allow_html=True,
             )
-            orig_terms = {t: w for t, w in term_weights.items() if w >= 1.0}
-            exp_terms  = {t: w for t, w in term_weights.items() if w <  1.0}
-            with st.expander(
-                f"📖 WordNet expansion — {len(exp_terms)} synonym(s) added",
-                expanded=True,
-            ):
-                c1, c2 = st.columns(2)
-                with c1:
-                    st.markdown("**Original terms** `weight 1.0`")
-                    for t in orig_terms:
-                        st.code(t, language=None)
-                with c2:
-                    gamma = getattr(config, "EXPANSION_GAMMA", 0.3)
-                    st.markdown(f"**Expanded synonyms** `weight {gamma}`")
-                    if exp_terms:
-                        for t, w in sorted(exp_terms.items(), key=lambda x: -x[1]):
-                            st.code(f"{t}  ·  {w:.3f}", language=None)
-                    else:
-                        st.caption("No synonyms found for this query.")
-        except Exception as e:
-            st.warning(f"Could not show expansion details: {e}")
 
-    # ── No results ──
-    if not ranked:
-        st.info("No results found. Try different terms or switch retrieval variant.")
-        st.stop()
+    # ── Search box ──
+    col_input, col_btn = st.columns([7, 1])
+    with col_input:
+        default_text = st.session_state.get("example_query", "")
+        query = st.text_input(
+            "Query",
+            value=default_text,
+            placeholder="e.g.  Hubble Telescope Achievements  ·  industrial espionage",
+            label_visibility="collapsed",
+            key="query_input",
+        )
+    with col_btn:
+        search_clicked = st.button("Search", type="primary", use_container_width=True)
 
-    max_score = ranked[0][0] if ranked else 1.0
-
-    # ── Results summary ──
+    # ── Example query chips — 5 per row ──
     st.markdown(
-        f'<div class="results-summary">'
-        f'<b>{len(ranked)}</b> results for <b>"{active_query}"</b>'
-        f'&nbsp;·&nbsp;{elapsed_ms:.0f} ms'
-        f'&nbsp;·&nbsp;variant: <b>{selected_name.replace("_", " ")}</b>'
-        f'</div>',
+        "<div style='font-size:0.72rem;color:#6c7086;margin:5px 0 3px 0;'>"
+        "Example TREC Robust04 topics:</div>",
         unsafe_allow_html=True,
     )
+    for row_start in range(0, len(EXAMPLE_QUERIES), 5):
+        row_qs = EXAMPLE_QUERIES[row_start:row_start + 5]
+        chip_cols = st.columns(len(row_qs))
+        for col, (q_text, q_num) in zip(chip_cols, row_qs):
+            with col:
+                if st.button(
+                    q_text, key=f"chip_{q_num}",
+                    help=f"TREC topic {q_num}",
+                    use_container_width=True,
+                ):
+                    st.session_state["example_query"]   = q_text
+                    st.session_state["active_topic_num"] = None
+                    st.rerun()
 
-    # ── Result cards ──
-    for rank_pos, (score, docno) in enumerate(ranked, start=1):
-
-        raw_snippet  = _get_snippet(docno, snippets, docno_to_id)
-        pseudo_title = _extract_title(raw_snippet)
-        body_preview = _truncate(_remaining_snippet(raw_snippet, pseudo_title))
-        hl_title     = _highlight_terms(pseudo_title, _stems)
-        hl_body      = _highlight_terms(body_preview, _stems)
-
-        source_label, badge_color = _get_source(docno)
-        score_pct = min(100, int((score / max_score) * 100)) if max_score > 0 else 0
-        quality_text, quality_cls = _score_quality(score, max_score)
-
-        # Snippet content
-        snippet_html = (
-            f'<span class="card-title">{hl_title}</span><br>'
-            if pseudo_title else ""
+    # ── Search history ──
+    history = st.session_state.get("query_history", [])
+    if history:
+        st.markdown(
+            "<div style='font-size:0.72rem;color:#6c7086;margin:6px 0 2px 0;'>"
+            "Recent searches:</div>"
+            + "".join(f'<span class="history-item">{h}</span>' for h in history[-5:]),
+            unsafe_allow_html=True,
         )
-        if hl_body:
-            snippet_html += f'<div class="snippet">{hl_body}</div>'
-        elif not pseudo_title:
-            snippet_html += '<div class="snippet"><em>No preview available.</em></div>'
 
-        card_html = f"""
+    st.markdown("<div style='height:4px'></div>", unsafe_allow_html=True)
+
+    # ── Execute search ──
+    active_query = query or st.session_state.get("example_query", "")
+
+    if not active_query:
+        # Welcome state
+        st.markdown("""
+<div style="background:#1e1e2e;border:1px solid #313244;border-radius:12px;
+            padding:28px 32px;margin-top:16px;text-align:center;">
+  <div style="font-size:2rem;margin-bottom:8px;">🔍</div>
+  <div style="font-size:1.1rem;font-weight:600;color:#cdd6f4;margin-bottom:6px;">
+    Enter a query above to search 500,000+ TREC documents
+  </div>
+  <div style="font-size:0.82rem;color:#6c7086;max-width:500px;margin:0 auto;">
+    Choose an example topic, pick a TREC topic from the dropdown, or type your own query.
+    Use the <strong>Evaluation Results</strong> tab to see system performance metrics.
+  </div>
+</div>
+""", unsafe_allow_html=True)
+    else:
+
+        t0 = time.time()
+        ranked = process_query(
+            query_text=active_query,
+            inverted_index=inverted_index,
+            doc_map=doc_map,
+            doc_stats=doc_stats,
+            collection_stats=collection_stats,
+            top_k=top_k,
+            variant_config=selected_variant,
+            debug=False,
+        )
+        elapsed_ms = (time.time() - t0) * 1000
+
+        # Update history
+        history = st.session_state.get("query_history", [])
+        if active_query not in history:
+            history.append(active_query)
+            st.session_state["query_history"] = history[-10:]
+
+        # Stems for highlighting
+        try:
+            import preprocess as _pp
+            _stems = set(st_t for _, st_t, _ in _pp.normalise(active_query))
+        except Exception:
+            _stems = set()
+
+        # Debug panel
+        if show_debug:
+            with st.expander("Query debug", expanded=True):
+                c1, c2, c3 = st.columns(3)
+                c1.metric("Results",   len(ranked))
+                c2.metric("Time (ms)", f"{elapsed_ms:.0f}")
+                c3.metric("Variant",   selected_name.split("_")[0])
+                if _stems:
+                    st.markdown("**Stems:** " + "  ".join(f"`{t}`" for t in sorted(_stems)))
+
+        # Expansion panel
+        if show_expansion and selected_variant["use_query_expansion"]:
+            try:
+                import preprocess as _pp
+                import query_expand as _qe
+                _norm = _pp.normalise(active_query)
+                _surf = [s for s, _, _ in _norm]
+                _orig = list(dict.fromkeys(st_t for _, st_t, _ in _norm))
+                _tw   = _qe.expand_query(_orig, _surf, inverted_index, collection_stats)
+                _exp  = {t: w for t, w in _tw.items() if w < 1.0}
+                with st.expander(f"WordNet expansion — {len(_exp)} synonym(s) added", expanded=True):
+                    c1, c2 = st.columns(2)
+                    with c1:
+                        st.markdown("**Original terms** `w = 1.0`")
+                        for t in [t for t, w in _tw.items() if w >= 1.0]:
+                            st.code(t, language=None)
+                    with c2:
+                        gamma = getattr(config, "EXPANSION_GAMMA", 0.3)
+                        st.markdown(f"**Expanded synonyms** `w = {gamma}`")
+                        for t, w in sorted(_exp.items(), key=lambda x: -x[1]):
+                            st.code(f"{t}  ·  {w:.3f}", language=None)
+            except Exception as e:
+                st.warning(f"Expansion detail error: {e}")
+
+        if not ranked:
+            st.info("No results found. Try different terms or switch variant.")
+        else:
+            max_score = ranked[0][0]
+
+            # Qrels for current topic (if selected)
+            relevant_set: set = set()
+            if active_topic_num:
+                relevant_set = qrels.get(str(active_topic_num), set())
+
+            st.markdown(
+                f'<div class="results-summary">'
+                f'<b>{len(ranked)}</b> results for <b>"{active_query}"</b>'
+                f'&nbsp;·&nbsp;{elapsed_ms:.0f} ms'
+                f'&nbsp;·&nbsp;variant: <b>{selected_name.replace("_", " ")}</b>'
+                + (f'&nbsp;·&nbsp;<span style="color:#a6e3a1;">topic {active_topic_num} — '
+                   f'{len(relevant_set)} relevant docs in qrels</span>'
+                   if active_topic_num and relevant_set else "")
+                + '</div>',
+                unsafe_allow_html=True,
+            )
+
+            # ── Result cards ──
+            for rank_pos, (score, docno) in enumerate(ranked, start=1):
+
+                raw_snip    = _get_snippet(docno, snippets, docno_to_id)
+                pseudo_title = _extract_title(raw_snip)
+                body_preview = _truncate(_remaining_snippet(raw_snip, pseudo_title))
+                hl_title     = _highlight_terms(pseudo_title, _stems)
+                hl_body      = _highlight_terms(body_preview,  _stems)
+
+                src_label, badge_color = _get_source(docno)
+                score_pct              = min(100, int((score / max_score) * 100))
+                quality_text, qual_cls = _score_quality(score, max_score)
+
+                # Relevance badge (only if a TREC topic is active)
+                rel_html = ""
+                if active_topic_num:
+                    if docno in relevant_set:
+                        rel_html = '<span class="rel-badge-yes">✓ Relevant</span>'
+                    else:
+                        rel_html = '<span class="rel-badge-no">✗ Not judged relevant</span>'
+
+                snippet_html = (f'<span class="card-title">{hl_title}</span><br>'
+                                if pseudo_title else "")
+                if hl_body:
+                    snippet_html += f'<div class="snippet">{hl_body}</div>'
+                elif not pseudo_title:
+                    snippet_html += '<div class="snippet"><em>No preview available.</em></div>'
+
+                card_html = f"""
 <div class="result-card">
   <div class="card-header">
     <span class="rank-badge">#{rank_pos}</span>
@@ -782,33 +874,220 @@ if active_query and (search_clicked or active_query):
       {snippet_html}
       <span class="card-docno">{docno}</span>
     </div>
-    <span class="source-badge" style="background:{badge_color};color:#e0e0f0;">
-      {source_label}
-    </span>
+    <span class="source-badge" style="background:{badge_color};">{src_label}</span>
+    {rel_html}
     <div class="score-block">
       <span class="score-value">{score:.4f}</span>
-      <span class="score-label {quality_cls}">{quality_text}</span>
+      <span class="score-label {qual_cls}">{quality_text}</span>
     </div>
   </div>
   <div class="score-bar-track">
     <div class="score-bar-fill" style="width:{score_pct}%;"></div>
   </div>
-</div>
-"""
-        st.markdown(card_html, unsafe_allow_html=True)
+</div>"""
+                st.markdown(card_html, unsafe_allow_html=True)
 
-    # ── Footer ──
-    st.markdown("---")
-    score_params = (
-        f"BM25F · k₁={config.K1} · b_title={config.B_TITLE} · b_body={config.B_BODY} · "
-        f"w_title={config.W_TITLE}"
-        + (f" · phrase λ={config.PHRASE_BONUS} · prox window={config.PROXIMITY_WINDOW}"
-           if selected_variant["use_phrase_bonus"] else "")
-        + (f" · expansion γ={getattr(config, 'EXPANSION_GAMMA', 0.3)}"
-           if selected_variant["use_query_expansion"] else "")
-    )
+                # ── Article viewer ──
+                art_key  = f"article_{docno}"
+                load_key = f"load_{rank_pos}_{docno}"
+                dl_key   = f"dl_{rank_pos}_{docno}"
+
+                btn_col, dl_col, spacer = st.columns([1.6, 1.6, 8])
+                with btn_col:
+                    if st.button("📄 Load Full Article", key=load_key, use_container_width=True):
+                        with st.spinner(f"Searching corpus for {docno}…"):
+                            doc = _find_document(docno)
+                        st.session_state[art_key] = doc
+
+                if art_key in st.session_state:
+                    doc = st.session_state[art_key]
+                    if doc:
+                        body_text = doc.get("body", "") or ""
+                        title_text = doc.get("title", "") or ""
+                        dl_content = (
+                            f"DOCNO: {docno}\n"
+                            + (f"Title: {title_text}\n" if title_text else "")
+                            + f"\n{body_text}"
+                        )
+                        with dl_col:
+                            st.download_button(
+                                "⬇ Download .txt",
+                                data=dl_content.encode("utf-8"),
+                                file_name=f"{docno}.txt",
+                                mime="text/plain",
+                                key=dl_key,
+                                use_container_width=True,
+                            )
+
+                        # Article display panel
+                        title_html = (
+                            f'<div class="article-title">{title_text}</div>'
+                            if title_text else
+                            f'<div class="article-title" style="color:#585b70;">'
+                            f'[No title — {src_label}]</div>'
+                        )
+                        st.markdown(
+                            f'<div class="article-panel">'
+                            f'{title_html}'
+                            f'<div style="font-size:0.70rem;color:#585b70;margin-bottom:10px;">'
+                            f'DOCNO: {docno} &nbsp;·&nbsp; {src_label}'
+                            f'</div>'
+                            f'<div class="article-body">{body_text[:8000]}'
+                            + ("\n\n[truncated — download for full text]"
+                               if len(body_text) > 8000 else "")
+                            + f'</div></div>',
+                            unsafe_allow_html=True,
+                        )
+                    else:
+                        st.warning(
+                            f"Article {docno} not found in corpus. "
+                            "Ensure the TREC data files are present at the paths in config.py."
+                        )
+
+            # ── Footer ──
+            st.markdown("---")
+            st.caption(
+                f"Top {len(ranked)} of up to {top_k} candidates · "
+                f"k₁={config.K1} · b_title={config.B_TITLE} · b_body={config.B_BODY} · "
+                f"w_title={config.W_TITLE}"
+                + (f" · phrase λ={config.PHRASE_BONUS} · prox window={config.PROXIMITY_WINDOW}"
+                   if selected_variant["use_phrase_bonus"] else "")
+                + (f" · expansion γ={getattr(config, 'EXPANSION_GAMMA', 0.3)}"
+                   if selected_variant["use_query_expansion"] else "")
+                + " · Snippet = first 200 chars of body · Title = first sentence of snippet"
+            )
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# TAB 2 — EVALUATION RESULTS
+# ═════════════════════════════════════════════════════════════════════════════
+with tab_eval:
+
+    st.markdown("### Ablation Evaluation — TREC Robust04")
     st.caption(
-        f"Showing top {len(ranked)} of up to {top_k} candidates · {score_params} · "
-        "Snippet = first 200 chars of document body · "
-        "Title = first sentence of snippet"
+        "249 topics (301–549) evaluated using official qrels. "
+        "Metrics: MAP (primary), P@10, nDCG@10, Recall@100, R-Precision."
     )
+
+    if eval_df is None:
+        st.warning(
+            "evaluation_results.csv not found. "
+            "Run evaluate.py against the TREC qrels to generate this file."
+        )
+    else:
+        # ── Clean display names for table ──
+        display_df = eval_df.copy()
+        display_df["System"] = display_df["variant"].map(
+            lambda n: _variant_label(n)
+        )
+        metric_cols = ["MAP", "P@10", "nDCG@10", "Recall@100", "R-Precision"]
+        available   = [c for c in metric_cols if c in display_df.columns]
+
+        # Round for display
+        for c in available:
+            display_df[c] = display_df[c].round(4)
+
+        # Find best MAP row
+        best_idx = display_df["MAP"].idxmax()
+
+        # ── Metric highlights ──
+        st.markdown("#### Key Metrics")
+        metric_display = available[:4]   # MAP, P@10, nDCG@10, Recall@100
+        col_metrics = st.columns(len(metric_display))
+        for col, metric in zip(col_metrics, metric_display):
+            best_val   = display_df[metric].max()
+            best_sys   = display_df.loc[display_df[metric].idxmax(), "System"]
+            worst_val  = display_df[metric].min()
+            delta_pct  = f"+{(best_val - worst_val) / worst_val * 100:.1f}% vs baseline"
+            with col:
+                st.metric(
+                    label=metric,
+                    value=f"{best_val:.4f}",
+                    delta=delta_pct,
+                    help=f"Best system: {best_sys}",
+                )
+
+        st.markdown("#### Results Table")
+        st.caption("⭐ = best-performing system per MAP")
+
+        # Build styled table as markdown
+        headers = ["System"] + available + ["Queries"]
+        rows = []
+        for _, row in display_df.iterrows():
+            star = " ⭐" if row.name == best_idx else ""
+            sys_name = row["System"] + star
+            vals = [f"{row[c]:.4f}" for c in available]
+            q = str(int(row["queries_evaluated"])) if "queries_evaluated" in row else "—"
+            rows.append([sys_name] + vals + [q])
+
+        table_df = pd.DataFrame(rows, columns=headers)
+        st.dataframe(
+            table_df,
+            use_container_width=True,
+            hide_index=True,
+        )
+
+        # ── Bar chart — MAP comparison ──
+        st.markdown("#### MAP by System")
+        chart_df = display_df[["System", "MAP"]].set_index("System")
+        st.bar_chart(chart_df, use_container_width=True)
+
+        # ── nDCG@10 ──
+        if "nDCG@10" in display_df.columns:
+            st.markdown("#### nDCG@10 by System")
+            ndcg_df = display_df[["System", "nDCG@10"]].set_index("System")
+            st.bar_chart(ndcg_df, use_container_width=True)
+
+        # ── Interpretation ──
+        st.markdown("#### Interpretation")
+        st.markdown("""
+**Pattern of improvement across variants:**
+
+- **BM25 Separate (unweighted)** underperforms even BM25 Flattened — scoring fields
+  separately without weighting distorts IDF accumulation and hurts precision.
+
+- **BM25F** (field-weighted) recovers and slightly improves over flattened BM25,
+  confirming that title weighting (×5) gives more signal than flat field merging.
+
+- **BM25F + Phrase & Proximity** shows the largest single gain — term-dependence
+  modelling captures documents that truly discuss a topic together rather than
+  mentioning terms incidentally.
+
+- **BM25F + Phrase/Prox + WordNet** maintains nearly identical MAP to phrase/proximity
+  alone, but improves R-Precision and Recall@100, showing that expansion helps recall
+  without significantly hurting precision — consistent with controlled γ=0.3 weighting.
+
+- **Neural reranking** (where evaluated) did not improve MAP, consistent with findings
+  that cross-encoder reranking of 50 candidates is sensitive to first-stage candidate
+  quality and may not help when lexical retrieval already ranks well.
+
+**Are the scores good?**
+MAP ≈ 0.20 on Robust04 is a reasonable result for a classical lexical system without
+neural retrieval. State-of-the-art neural dense retrieval achieves MAP ≈ 0.35–0.45 on
+this collection, but requires GPU and large pre-trained models. The key contribution of
+this system is demonstrating that careful engineering of BM25F + term-dependence +
+controlled expansion yields meaningful, interpretable gains over a flat BM25 baseline.
+""")
+
+        # ── Per-query results if available ──
+        pq_path = os.path.join(_BASE, "per_query_results.csv")
+        if os.path.exists(pq_path):
+            st.markdown("#### Per-Query Results (top 10 topics by AP, best variant)")
+            try:
+                pq_df = pd.read_csv(pq_path, skiprows=1)
+                if "variant" in pq_df.columns and "AP" in pq_df.columns:
+                    best_variant_name = display_df.loc[best_idx, "variant"]
+                    pq_best = (
+                        pq_df[pq_df["variant"] == best_variant_name]
+                        .sort_values("AP", ascending=False)
+                        .head(10)
+                    )
+                    show_cols = [c for c in ["topic_id", "query", "AP", "P@10", "nDCG@10"]
+                                 if c in pq_best.columns]
+                    st.dataframe(
+                        pq_best[show_cols].reset_index(drop=True),
+                        use_container_width=True,
+                        hide_index=True,
+                    )
+            except Exception as e:
+                st.caption(f"Could not load per-query results: {e}")
