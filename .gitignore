@@ -2,7 +2,13 @@
 index_data/
 
 # Dataset (not committed — too large)
+TREC-Disk-4/
+TREC-Disk-5/
 drive-download-*/
+
+# Evaluation outputs
+evaluation_results.csv
+per_query_results.csv
 
 # Python
 __pycache__/
@@ -12,9 +18,7 @@ __pycache__/
 venv/
 .venv/
 
-# Claude Code
-.claude/
-
 # OS
 .DS_Store
 Thumbs.db
+
